@@ -180,6 +180,24 @@ def test_parse_settings_profile_layers_between_global_and_run_override():
     assert st.sampling["temperature"] == 0.9
 
 
+def test_parse_settings_context_uses_active_preset_then_explicit_override(tmp_path):
+    cfg = copy.deepcopy(CFG)
+    cfg["orchestrator"]["context_tokens"] = 262144
+    preset = tmp_path / "brain.conf"
+    preset.write_text("CTX_SIZE=65536\n")
+    cfg["models"]["slots"] = {"brain": "brain-x"}
+    cfg["models"]["presets"]["brain-x"]["preset"] = str(preset)
+    # Another historical preset sharing the alias must not win over the slot.
+    cfg["models"]["presets"]["old-brain"] = {
+        "alias": "local-orchestrator", "preset": "missing.conf"}
+    assert _parse(cfg).context_tokens == 65536
+    assert _parse(cfg, run_overrides={"context_tokens": 123}).context_tokens == 123
+    # Explicit zero is an override, not a falsy fallback to the global value.
+    assert _parse(cfg, run_overrides={"context_tokens": 0}).context_tokens == 0
+    # An unknown/non-slot alias still uses the global fallback.
+    assert _parse(cfg, model="local-plain").context_tokens == 262144
+
+
 def test_parse_settings_nondefault_model_gets_only_its_profile_sampling():
     # A non-default model keeps its OWN preset's pinned sampling (the
     # brain's orchestrator.sampling never leaks) — unchanged legacy behavior

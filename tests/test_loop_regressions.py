@@ -14,6 +14,7 @@ import httpx
 
 from runtime.budget import Budget
 from runtime.loop import AgentRuntime, _child_budget, _strip_think
+from runtime.model_client import ContextWindowExceeded
 from runtime.quick_reply import QuickReply, _display_name
 from runtime.run_state import RunState
 from runtime.selector import ToolSelector
@@ -2330,6 +2331,69 @@ def _poll_rt(script, errors, **lg):
     return out, tool_msgs
 
 
+class _PollStateTool(_FakePoll):
+    def __init__(self, states):
+        super().__init__([])
+        self.states = list(states)
+
+    async def execute(self, args, ctx):
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"state": state})
+
+
+def _poll_states_rt(script, states):
+    reg = _Registry([], real={"job.status": _PollStateTool(states)})
+    rt, _ = _runtime(reg, script)
+    rt._poll_safe = {"job.status"}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("poll loop", work_root=tempfile.mkdtemp(),
+                             is_admin=True, on_event=on_event))
+    return out, events
+
+
+def test_terminal_polls_advance_stall_ladder():
+    out, events = _poll_states_rt(
+        [_tc("job.status", "{}")] * 3 + [_final("done")],
+        ["succeeded"] * 3)
+    assert out["status"] == "ok"
+    assert any(e["type"] == "stall_check" for e in events), \
+        "a finished job has nothing left to wait for"
+
+
+def test_active_polls_stay_neutral():
+    out, events = _poll_states_rt(
+        [_tc("job.status", "{}")] * 4 + [_final("done")], ["running"] * 4)
+    assert out["status"] == "ok"
+    assert not any(e["type"] == "stall_check" for e in events)
+
+
+def test_running_to_terminal_transition_only_stalls_on_terminal_polls():
+    out, events = _poll_states_rt(
+        [_tc("job.status", "{}")] * 5 + [_final("done")],
+        ["running", "running", "succeeded", "succeeded", "succeeded"])
+    assert out["status"] == "ok"
+    stall = [e for e in events if e["type"] == "stall_check"]
+    assert len(stall) == 1 and stall[0]["data"]["turns"] == 2
+
+
+def test_terminal_poll_detection_covers_job_list():
+    from runtime.loop import _terminal_job_poll
+
+    def result(payload):
+        return ToolResult(status="ok", tool_name="job.list", result=payload)
+
+    assert _terminal_job_poll("job.list", result({"jobs": [
+        {"state": "succeeded"}, {"state": "failed"}]}))
+    assert not _terminal_job_poll("job.list", result({"jobs": [
+        {"state": "succeeded"}, {"state": "running"}]}))
+    assert not _terminal_job_poll("web.search", result({"state": "succeeded"}))
+
+
 def test_failure_nudge_hard_error_any_tool():
     """job.status is in neither failure_nudge_tools nor near_dup_tools — but
     a hard error is never productive signal, so 3 identical failures still
@@ -4623,6 +4687,64 @@ def test_final_synthesis_failure_falls_back_to_cap_text():
     assert out["status"] == "budget_exceeded"
     assert out["answer"].startswith("[Run terminated: max_iterations]")
     assert len(schemas) == 5, "the synthesis turn was attempted"
+
+
+def _context_overflow_rt(script):
+    """One large tool result, then scripted context errors/final answers."""
+    class _LargeReader(_StallReader):
+        async def execute(self, args, ctx):
+            self.exec_count += 1
+            return ToolResult(status="ok", tool_name=self.name,
+                              result={"text": "x" * 5000})
+
+    reader = _LargeReader()
+    rt, _ = _runtime(_Registry([], real={reader.name: reader}), [])
+    rt.config["compaction"] = {"enabled": True, "max_result_chars": 2000,
+                               "keep_last": 3, "every": 3}
+    turns = list(script)
+    seen, schemas = [], []
+
+    async def fake(messages, tools_schema, **kw):
+        seen.append(json.loads(json.dumps(messages)))
+        schemas.append(tools_schema)
+        item = turns.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return {"message": item, "usage": {}}
+
+    rt._model_turn = fake
+    return rt, seen, schemas
+
+
+def test_context_overflow_compacts_and_recovers_once():
+    rt, seen, schemas = _context_overflow_rt([
+        _tc("x.read", "{}"), ContextWindowExceeded("context full"),
+        _final("FINAL ANSWER: recovered")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("research", work_root=tempfile.mkdtemp(),
+                             on_event=on_event))
+    assert out["status"] == "ok"
+    assert out["answer"].endswith("FINAL ANSWER: recovered")
+    assert out["answer"].startswith("[Recovered after context window exhaustion]")
+    assert len(schemas) == 3 and schemas[-1] == []
+    assert any("__compacted__" in (m.get("content") or "")
+               for m in seen[-1] if m.get("role") == "tool")
+    assert any(e["type"] == "compaction" and e["data"].get("emergency")
+               for e in events)
+
+
+def test_context_overflow_failed_recovery_keeps_error_and_stops():
+    rt, _, schemas = _context_overflow_rt([
+        _tc("x.read", "{}"), ContextWindowExceeded("context full"),
+        ContextWindowExceeded("still full")])
+    out = asyncio.run(rt.run("research", work_root=tempfile.mkdtemp()))
+    assert out["status"] == "error"
+    assert out["answer"].startswith("[Internal error: ContextWindowExceeded")
+    assert len(schemas) == 3, "one overflow and one failed recovery, never a loop"
 
 
 def _bare_run_state(with_tool_output):

@@ -55,6 +55,7 @@ from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
 from .final_guards import FINAL_ANSWER_GUARDS, GuardContext, apply_final_guards
 from .model_client import (  # noqa: F401  (re-exported)
     _NULL_ASYNC_CTX,
+    ContextWindowExceeded,
     ModelClientMixin,
     ModelTurnStalled,
     _is_local_model,
@@ -207,6 +208,23 @@ def _patch_run_config(config: dict, tools_patch: dict | None,
         merged.update(kv)
         cfg[section] = merged
     return cfg
+
+
+_ACTIVE_JOB_STATES = frozenset({"running", "pending", "queued", "starting"})
+
+
+def _terminal_job_poll(name: str, result) -> bool:
+    """A successful job poll with no active work left to wait for."""
+    if not name.startswith("job.") or result.status != "ok" \
+            or not isinstance(result.result, dict):
+        return False
+    payload = result.result
+    if name == "job.list":
+        jobs = [j for j in (payload.get("jobs") or []) if isinstance(j, dict)]
+        return all(str(j.get("state") or "").lower() not in _ACTIVE_JOB_STATES
+                   for j in jobs)
+    state = str(payload.get("state") or "").lower()
+    return bool(state and state not in _ACTIVE_JOB_STATES)
 
 
 def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None) -> int:
@@ -809,6 +827,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         for plan in plans:
             tc = plan["tc"]; name = plan["name"]
             args = plan["args"]; result = plan["result"]
+            plan["terminal_poll"] = _terminal_job_poll(name, result)
             await emit("tool_result", rs.budget.iterations, {
                 "tool": name,
                 "args": args,
@@ -1607,9 +1626,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _mg_before = await self._record_tool_results(
                     plans, rs, emit, emit_cost, post_tool_guards)
                 # Stall ladder bookkeeping: a turn that bumped the mutation
-                # generation made progress (reset); a turn of ONLY poll-safe
-                # probes is waiting on work already started (neutral); anything
-                # else — reads, searches, errors, rejections — is a no-progress
+                # generation made progress (reset); a turn of ONLY ACTIVE
+                # job polls is waiting on work (neutral); anything else —
+                # reads, searches, errors, rejections, terminal polls — is a no-progress
                 # turn and moves the ladder closer to its next rung.
                 # Exception: product-free turns (todo/pin/badge fiddling or
                 # verify-only code.check streaks) bump the mutation generation
@@ -1618,12 +1637,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if stall_enabled and stall_after:
                     _no_product = bool(plans) and all(
                         p["name"] in _NO_PRODUCT_TOOLS for p in plans)
-                    # No-change turns: every call was a poll-safe probe or an
-                    # identical twin of an earlier success — the mutation
-                    # bump says "changed", but byte-identical rewrites change
-                    # nothing — D014.
+                    # No-change turns: every call was a terminal poll or an
+                    # identical twin of an earlier success. Active job polls
+                    # stay neutral; a terminal result has no work left to wait
+                    # for, so repeating it must advance the stall ladder.
                     _no_change = bool(plans) and all(
-                        p.get("repeat_ok") or p["name"] in self._poll_safe
+                        p.get("repeat_ok") or p.get("terminal_poll")
                         for p in plans)
                     # Fresh-diagnostic turns: a code.check-ONLY turn whose
                     # every call is NEW — args not a repeat of an earlier
@@ -1680,7 +1699,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     elif _fresh_diag or _fresh_research:
                         pass            # neutral: fresh diagnostics/research
                     elif not (plans and all(
-                            p["name"] in self._poll_safe for p in plans)):
+                            p["name"] in self._poll_safe
+                            and not p.get("terminal_poll") for p in plans)):
                         rs.stall_turns += 1
 
         except asyncio.CancelledError:
@@ -1720,16 +1740,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
         except Exception as e:
-            rs.status = "error"
-            rs.error_msg = f"{type(e).__name__}: {e}"
-            log.exception("Unexpected error in agent loop")
-            # Preserve the partial answer like the budget/stall handlers do —
-            # an un-retried backend blip must not REPLACE everything the run
-            # had produced with the raw error — D017.
-            rs.final_answer = (
-                f"[Internal error: {rs.error_msg}]\n"
-                f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
-            )
+            await self._handle_run_exception(
+                rs, st, e, run_id=run_id, model=eff_model,
+                sampling=eff_sampling, think=think, emit=emit)
 
         return await self._finish_run(
             rs, run_id=run_id, emit=emit, verify_spec=verify_spec,
@@ -2895,29 +2908,74 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 else f"budget: iteration {used}")
         return {"role": "system", "content": line}
 
+    async def _handle_run_exception(self, rs: RunState, st, error: Exception,
+                                    *, run_id, model, sampling, think, emit) -> None:
+        """Recover a context overflow once; preserve other unexpected errors."""
+        if isinstance(error, ContextWindowExceeded):
+            rs.status = "error"
+            rs.error_msg = f"{type(error).__name__}: {error}"
+            rs.final_answer = (
+                f"[Internal error: {rs.error_msg}]\n"
+                f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}")
+            log.warning("Run %s exhausted the context window; attempting one "
+                        "compacted final answer", run_id)
+            answer = await self._context_recovery(
+                rs, st, model=model, sampling=sampling, think=think, emit=emit)
+            if answer:
+                rs.status = "ok"
+                rs.error_msg = ""
+                rs.final_answer = answer
+            return
+        rs.status = "error"
+        rs.error_msg = f"{type(error).__name__}: {error}"
+        log.exception("Unexpected error in agent loop")
+        # Preserve the partial answer like the budget/stall handlers do.
+        rs.final_answer = (
+            f"[Internal error: {rs.error_msg}]\n"
+            f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
+        )
+
+    async def _context_recovery(self, rs: RunState, st, *, model, sampling,
+                                think, emit) -> str | None:
+        """One emergency compact + no-tools answer after a context-window 400.
+        Recent large results lose their usual recency protection; pins stay."""
+        cfg = {**st.compaction, "enabled": True, "keep_last": 0}
+        compacted = _compact_messages(rs.messages, cfg, rs.pinned)
+        if compacted:
+            await emit("compaction", rs.budget.iterations,
+                       {"compacted": compacted, "emergency": True})
+        answer = await self._final_synthesis(
+            rs, model=model, sampling=sampling, think=think, reason="context")
+        if answer:
+            await emit("progress", rs.budget.iterations, {
+                "label": "context window exhausted — recovered a final answer "
+                         "from the compacted work",
+                "type": "guard"})
+        return answer
+
     async def _final_synthesis(self, rs: RunState, *, model: str | None = None,
                                sampling: dict | None = None,
-                               think: bool = True) -> str | None:
-        """One last NO-TOOLS model turn after max_iterations cut the run
-        (agent.final_synthesis): summarize what was gathered and name what's
-        unverified, instead of dying with "(no answer produced yet)" — the
-        LangChain early_stopping_method="generate" pattern. Runs only when the
-        run actually gathered something (a tool result exists); an untouched
-        run keeps the plain termination text. Any failure (model error, empty
-        content, tool calls emitted anyway) → None, caller keeps the fallback.
-        Usage is recorded for accounting but never re-checked against the
-        tripped budget."""
+                               think: bool = True,
+                               reason: str = "iteration") -> str | None:
+        """One last NO-TOOLS turn after max_iterations or a context overflow.
+        Summarize what was gathered instead of dying with no answer. Runs only
+        when a tool result exists; any failure returns None so the caller keeps
+        the plain termination text. Usage is recorded, never budget-checked."""
         if not any(m.get("role") == "tool" for m in rs.messages):
             return None
-        messages = list(rs.messages) + [{
-            "role": "system",
-            "content": (
-                "The iteration budget is exhausted — no more steps and no tool "
-                "calls are possible. Write the final answer NOW from what you "
-                "already gathered: the findings so far, then a short "
-                "'Unverified / not done:' list of what remains. If the task "
-                "defined an answer format, use it exactly. Do not call any "
-                "tool.")}]
+        context_recovery = reason == "context"
+        directive = (
+            "The context window is exhausted — no more steps and no tool calls "
+            "are possible. Write the final answer NOW from what you already "
+            "gathered. If the task defined an answer format, use it exactly. "
+            "Do not call any tool."
+            if context_recovery else
+            "The iteration budget is exhausted — no more steps and no tool "
+            "calls are possible. Write the final answer NOW from what you "
+            "already gathered: the findings so far, then a short "
+            "'Unverified / not done:' list of what remains. If the task "
+            "defined an answer format, use it exactly. Do not call any tool.")
+        messages = list(rs.messages) + [{"role": "system", "content": directive}]
         try:
             turn = await self._model_turn(messages, [], model=model,
                                           think=think, sampling=sampling)
@@ -2941,7 +2999,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
                     if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
             cost_table=self.cost_table)
-        return PARTIAL_SYNTHESIS_MARKER + "\n\n" + text
+        marker = ("[Recovered after context window exhaustion]"
+                  if context_recovery else PARTIAL_SYNTHESIS_MARKER)
+        return marker + "\n\n" + text
 
     def _tool_call_timeout(self, name: str) -> float:
         """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool

@@ -1016,23 +1016,37 @@ _BFCL_TYPE_MAP = {"string": "string", "integer": "integer", "float": "number",
                   "dict": "object", "any": "string"}
 
 
+def _bfcl_parameter_schema(spec: dict) -> dict:
+    """Convert one BFCL parameter, retaining its nested JSON-Schema shape."""
+    spec = dict(spec or {})
+    t = _BFCL_TYPE_MAP.get(str(spec.get("type") or "any"), "string")
+    out: dict = {"type": t}
+    if spec.get("description"):
+        out["description"] = str(spec["description"])
+    if spec.get("enum"):
+        out["enum"] = list(spec["enum"])
+    if t == "object":
+        nested = spec.get("properties")
+        if isinstance(nested, dict):
+            out["properties"] = {
+                str(name): _bfcl_parameter_schema(child)
+                for name, child in nested.items()
+            }
+        if "required" in spec:
+            out["required"] = [str(r) for r in (spec.get("required") or [])]
+    if t == "array" and isinstance(spec.get("items"), dict):
+        out["items"] = _bfcl_parameter_schema(spec["items"])
+    return out
+
+
 def _bfcl_schema(fn: dict) -> dict:
     """BFCL function schema → JSON-Schema tool parameters (their type
     vocabulary — dict/tuple/any/… — becomes object/array/string/…)."""
     params = fn.get("parameters") or {}
-    props: dict = {}
-    for pname, spec in (params.get("properties") or {}).items():
-        spec = dict(spec or {})
-        t = _BFCL_TYPE_MAP.get(str(spec.get("type") or "any"), "string")
-        out: dict = {"type": t}
-        if spec.get("description"):
-            out["description"] = str(spec["description"])
-        if spec.get("enum"):
-            out["enum"] = list(spec["enum"])
-        if t == "array" and isinstance(spec.get("items"), dict):
-            out["items"] = {"type": _BFCL_TYPE_MAP.get(
-                str(spec["items"].get("type") or "any"), "string")}
-        props[str(pname)] = out
+    props = {
+        str(pname): _bfcl_parameter_schema(spec)
+        for pname, spec in (params.get("properties") or {}).items()
+    }
     return {"type": "object", "properties": props,
             "required": [str(r) for r in (params.get("required") or [])]}
 

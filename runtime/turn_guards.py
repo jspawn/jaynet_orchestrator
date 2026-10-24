@@ -320,8 +320,8 @@ class BudgetFinalNoticeGuard(PreTurnGuard):
 class ContextPressureGuard(PreTurnGuard):
     """Same one-shot nudge when the PROMPT itself nears the context window —
     distinct from the token BUDGET (cumulative spend); this is about the
-    per-turn window filling up. orchestrator.context_tokens 0/unset
-    disables (the loop passes the resolved value as tctx.ctx_tokens)."""
+    per-turn window filling up. The loop resolves an explicit override, then
+    the active preset CTX_SIZE, then orchestrator.context_tokens; 0 disables."""
     name = "context_warning"
 
     async def check(self, rs: RunState) -> PreTurnAction | None:

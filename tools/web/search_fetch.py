@@ -77,6 +77,54 @@ _STATUS_HINTS = {
     406: "site blocks plain fetches — retry once with js=true (headless browser)",
     429: "rate-limited — don't retry this URL; work with web.search snippets instead",
 }
+_BINARY_MIME_TYPES = frozenset({
+    "application/epub+zip",
+    "application/gzip",
+    "application/java-archive",
+    "application/msword",
+    "application/octet-stream",
+    "application/pdf",
+    "application/rtf",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.rar",
+    "application/x-7z-compressed",
+    "application/x-bzip",
+    "application/x-bzip2",
+    "application/x-gzip",
+    "application/x-pdf",
+    "application/x-rar-compressed",
+    "application/x-tar",
+    "application/x-xz",
+    "application/x-zip-compressed",
+    "application/zip",
+    "application/zstd",
+})
+_BINARY_MIME_PREFIXES = ("image/", "audio/", "video/")
+_BINARY_RESPONSE_ERROR = (
+    "binary_response: binary content cannot be decoded as text — "
+    "use web.request(save_path=...) to download it"
+)
+
+
+class BinaryResponse(Exception):
+    """A response that must be downloaded instead of decoded as text."""
+
+
+def is_binary_response(content_type: str | None, body: bytes) -> bool:
+    """Recognize binary payloads by PDF magic or their normalized MIME type."""
+    if body.startswith(b"%PDF-"):
+        return True
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    return mime in _BINARY_MIME_TYPES or mime.startswith(_BINARY_MIME_PREFIXES)
+
+
 # Hard cap on a direct-fetch response body: read at most this many bytes off the
 # wire, never slurp an unbounded page into memory (the char cap applies after).
 _MAX_FETCH_BYTES = 8 * 1024 * 1024
@@ -385,7 +433,9 @@ class WebFetch(Tool):
         "truncated to a reasonable length. Extraction strips layout, indentation, "
         "columns, and table formatting — so for any question that hinges on how "
         "text is positioned or indented, use web.request to pull the raw HTML and "
-        "inspect it instead. Use after web.search to read a specific page. "
+        "inspect it instead. Binary responses (PDFs, archives, documents, and "
+        "media) are refused; use web.request(save_path=...) to download them. "
+        "Use after web.search to read a specific page. "
         "For JS-heavy pages (apps, dashboards, login walls — or when a plain fetch "
         "comes back thin), pass js=true to load the page in a headless browser and "
         "read the text AFTER JavaScript runs (slower — plain fetch first). "
@@ -449,6 +499,8 @@ class WebFetch(Tool):
 
         try:
             html = await self._fetch_direct(url, timeout)
+        except BinaryResponse as e:
+            return ToolResult(status="error", result=None, error=str(e))
         except SsrfRefused as e:
             return ToolResult(status="error", result=None, error=str(e))
         except httpx.HTTPStatusError as e:
@@ -494,6 +546,7 @@ class WebFetch(Tool):
     async def _fetch_direct(self, url: str, timeout: int) -> str:
         chunks: list[bytes] = []
         size = 0
+        content_type = ""
         # Redirects are followed by hand: every hop is re-checked against the
         # SSRF guard, so a public URL can't 302 us into loopback/metadata.
         async with httpx.AsyncClient(timeout=timeout, headers=_FETCH_HEADERS) as client:
@@ -508,6 +561,9 @@ class WebFetch(Tool):
                         url = urljoin(url, loc)
                         continue
                     r.raise_for_status()
+                    content_type = getattr(r, "headers", {}).get("content-type", "")
+                    if is_binary_response(content_type, b""):
+                        raise BinaryResponse(_BINARY_RESPONSE_ERROR)
                     # Stop reading past _MAX_FETCH_BYTES — a huge (or endless)
                     # body is never slurped fully into memory.
                     async for chunk in r.aiter_bytes():
@@ -518,7 +574,10 @@ class WebFetch(Tool):
                 break
             else:
                 raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
-        return b"".join(chunks).decode("utf-8", "replace")
+        body = b"".join(chunks)
+        if is_binary_response(content_type, body):
+            raise BinaryResponse(_BINARY_RESPONSE_ERROR)
+        return body.decode("utf-8", "replace")
 
 
 def extract_main_text(html: str) -> str | None:

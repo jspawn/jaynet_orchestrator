@@ -22,18 +22,32 @@ from __future__ import annotations
 
 import asyncio
 import json as jsonlib
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.web.search_fetch import _MAX_REDIRECTS, _UA, SsrfRefused, refusal_text, ssrf_refusal
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
+from tools.web.search_fetch import (
+    _BINARY_RESPONSE_ERROR,
+    _MAX_REDIRECTS,
+    _UA,
+    SsrfRefused,
+    is_binary_response,
+    refusal_text,
+    ssrf_refusal,
+)
 
 _MAX_WIRE_BYTES = 8 * 1024 * 1024     # response read cap (same as web.fetch)
 _MAX_BODY_CHARS = 1_000_000           # outgoing body cap
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 _METHODS = _READ_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
 _CREDENTIAL_HEADERS = {"authorization", "cookie"}
+
+
+def _write_download(path: Path, body: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
 
 
 def _retry_after_s(headers: dict) -> float:
@@ -54,13 +68,71 @@ def _origin(url: str) -> tuple:
             p.port or (443 if p.scheme == "https" else 80))
 
 
+async def _response_result(tool_name: str, *, url: str, method: str,
+                           status: int, resp_headers: dict,
+                           chunks: list[bytes], size: int,
+                           destination: Path | None, offset: int,
+                           max_chars: int) -> ToolResult:
+    """Save a download or turn a text response into the standard tool result."""
+    response_body = b"".join(chunks)
+    ctype = resp_headers.get("content-type", "")
+    if destination is not None:
+        if size > _MAX_WIRE_BYTES:
+            return ToolResult(
+                status="error", result=None, tool_name=tool_name,
+                error=f"response_too_large: download exceeds the "
+                      f"{_MAX_WIRE_BYTES}-byte cap; no file was saved")
+        try:
+            await asyncio.to_thread(_write_download, destination, response_body)
+        except Exception as e:
+            return ToolResult(status="error", result=None, tool_name=tool_name,
+                              error=f"save failed: {type(e).__name__}: {e}")
+        return ToolResult(status="ok", tool_name=tool_name, result={
+            "url": url, "method": method, "status_code": status,
+            "path": str(destination), "bytes": len(response_body),
+            "content_type": ctype, "truncated": False,
+        })
+    if is_binary_response(ctype, response_body):
+        return ToolResult(status="error", result=None, tool_name=tool_name,
+                          error=_BINARY_RESPONSE_ERROR)
+
+    text = response_body.decode("utf-8", "replace")
+    result = {
+        "url": url, "method": method, "status_code": status,
+        "content_type": ctype,
+        "truncated": size > _MAX_WIRE_BYTES or len(text) > offset + max_chars,
+    }
+    if "application/json" in ctype or "text/json" in ctype:
+        try:
+            # Parse the full (wire-capped) body; the ToolResult envelope
+            # applies its own 20k-char cap when serializing for the model.
+            result["json"] = jsonlib.loads(text)
+        except (ValueError, TypeError):
+            result["body"] = text[offset:offset + max_chars]
+    else:
+        result["body"] = text[offset:offset + max_chars]
+    # Pagination hint on text bodies (JSON parses whole): without an offset
+    # to page with, the model refetches the same truncated head in a loop.
+    # Only when the char cap is the binding constraint — a wire-capped body
+    # (>8MB) can't be paged further by refetching.
+    if "body" in result and len(text) > offset + max_chars:
+        end = offset + len(result["body"])
+        result["offset"] = offset
+        result["original_length"] = len(text)
+        result["hint"] = (f"showing chars {offset}–{end} of {len(text)} — "
+                          f"call again with offset={end} to continue reading")
+    return ToolResult(status="ok", result=result, tool_name=tool_name)
+
+
 class WebRequest(Tool):
     name = "web.request"
     description = (
         "Make an HTTP request to an API endpoint and get the raw response: any "
         "method (GET/POST/PUT/PATCH/DELETE), custom headers, optional JSON or raw "
         "body. Use for REST APIs and webhooks that web.fetch (GET, text-only) "
-        "can't reach. Write methods ask for confirmation. Loopback targets are "
+        "can't reach. For a GET download, set save_path to a workspace file; "
+        "binary responses require it, and downloads are capped at 8 MiB. "
+        "Write methods ask for confirmation. Loopback targets are "
         "refused — use ops.run for services on this box. A 429 rate limit is "
         "retried once automatically, then comes back as an error — back off or "
         "switch sources, never re-issue it in a loop. Never put private local "
@@ -80,6 +152,11 @@ class WebRequest(Tool):
                      "description": "Send this object as a JSON body (sets content-type)."},
             "body": {"type": "string",
                      "description": "Raw request body (alternative to json)."},
+            "save_path": {"type": "string",
+                          "description": "GET only: save the response to this workspace "
+                                         "path instead of returning its body. Parent "
+                                         "directories are created; 8 MiB maximum. "
+                                         "Required for binary downloads."},
             "timeout_s": {"type": "integer", "default": 30, "minimum": 1, "maximum": 120},
             "max_chars": {"type": "integer", "default": 20000, "minimum": 500,
                           "maximum": 100000,
@@ -111,6 +188,21 @@ class WebRequest(Tool):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"unsupported method {method!r} "
                                     f"(one of {', '.join(sorted(_METHODS))})")
+        save_path = args.get("save_path")
+        if save_path is not None and method != "GET":
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error="save_path is only supported for GET requests")
+        destination: Path | None = None
+        if save_path is not None:
+            if not isinstance(save_path, str) or not save_path.strip():
+                return ToolResult(status="error", result=None, tool_name=self.name,
+                                  error="save_path must be a non-empty path")
+            try:
+                destination = resolve_in_roots(
+                    work_roots(ctx), save_path, must_exist=False)
+            except (OSError, RuntimeError) as e:
+                return ToolResult(status="error", result=None, tool_name=self.name,
+                                  error=f"invalid save_path: {e}")
 
         headers = {"User-Agent": _UA}
         for k, v in (args.get("headers") or {}).items():
@@ -194,30 +286,7 @@ class WebRequest(Tool):
                       "will keep failing. Wait a minute, or get the same "
                       "data from a different source/endpoint.")
 
-        text = b"".join(chunks).decode("utf-8", "replace")
-        ctype = resp_headers.get("content-type", "")
-        result = {
-            "url": url, "method": method, "status_code": status,
-            "content_type": ctype,
-            "truncated": size > _MAX_WIRE_BYTES or len(text) > offset + max_chars,
-        }
-        if "application/json" in ctype or "text/json" in ctype:
-            try:
-                # Parse the full (wire-capped) body; the ToolResult envelope
-                # applies its own 20k-char cap when serializing for the model.
-                result["json"] = jsonlib.loads(text)
-            except (ValueError, TypeError):
-                result["body"] = text[offset:offset + max_chars]
-        else:
-            result["body"] = text[offset:offset + max_chars]
-        # Pagination hint on text bodies (JSON parses whole): without an offset
-        # to page with, the model refetches the same truncated head in a loop.
-        # Only when the char cap is the binding constraint — a wire-capped body
-        # (>8MB) can't be paged further by refetching.
-        if "body" in result and len(text) > offset + max_chars:
-            end = offset + len(result["body"])
-            result["offset"] = offset
-            result["original_length"] = len(text)
-            result["hint"] = (f"showing chars {offset}–{end} of {len(text)} — "
-                              f"call again with offset={end} to continue reading")
-        return ToolResult(status="ok", result=result, tool_name=self.name)
+        return await _response_result(
+            self.name, url=url, method=method, status=status,
+            resp_headers=resp_headers, chunks=chunks, size=size,
+            destination=destination, offset=offset, max_chars=max_chars)

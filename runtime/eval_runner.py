@@ -1930,6 +1930,10 @@ async def _setup_case_run(runtime, case: EvalCase,
         tools = _unattended_tools(runtime, disabled_tools)
         if stub_names:
             tools = list(stub_names)
+            # Zero calls are correct for irrelevance rows; this guard would
+            # demand code.run/web.search, which stub-only runs do not expose.
+            if "just_reply" not in guards_off:
+                guards_off.append("just_reply")
         if (variant or {}).get("harness") == "brain":
             tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
         # Control arms (docs/harness-lessons.md #1): tools_only restricts

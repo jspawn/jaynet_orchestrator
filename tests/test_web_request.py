@@ -260,3 +260,71 @@ def test_retry_after_parsing():
     assert M._retry_after_s({"retry-after": "3600"}) == 8.0   # capped
     assert M._retry_after_s({}) == 3.0                        # default
     assert M._retry_after_s({"retry-after": "garbage"}) == 3.0
+
+
+# ---- binary responses and workspace-confined downloads ----
+def _run_with_root(args, root):
+    ctx = ToolContext(request_id="t", config={}, budget=None, work_root=root)
+    return asyncio.run(WebRequest().execute(args, ctx))
+
+
+@pytest.fixture
+def download_http(fake_http, monkeypatch):
+    async def public_target(host):
+        return None
+    monkeypatch.setattr(M, "ssrf_refusal", public_target)
+    return fake_http
+
+
+def test_binary_response_without_save_path_is_typed_error(download_http):
+    download_http.resp = _Resp(200, {"content-type": "application/pdf"},
+                               [b"%PDF-1.7\n\x00binary"])
+    r = _run({"url": "https://files.example.com/document"})
+    assert r.status == "error" and r.result is None
+    assert r.error.startswith("binary_response:")
+    assert "web.request(save_path=...)" in r.error
+
+
+def test_get_save_path_downloads_into_confined_parents(download_http, tmp_path):
+    payload = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n\x00binary"
+    download_http.resp = _Resp(200, {"content-type": "application/pdf"},
+                               [payload[:8], payload[8:]])
+    r = _run_with_root({"url": "https://files.example.com/document",
+                        "save_path": "downloads/nested/document.pdf"}, tmp_path)
+    target = tmp_path / "downloads" / "nested" / "document.pdf"
+    assert r.status == "ok"
+    assert target.read_bytes() == payload
+    assert r.result["path"] == str(target)
+    assert r.result["bytes"] == len(payload)
+    assert r.result["content_type"] == "application/pdf"
+    assert "body" not in r.result
+
+
+def test_save_path_escape_refused_before_request(download_http, tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "escape.pdf"
+    r = _run_with_root({"url": "https://files.example.com/document",
+                        "save_path": "../escape.pdf"}, root)
+    assert r.status == "error" and "outside your workspace" in r.error
+    assert download_http.calls == []
+    assert not outside.exists()
+
+
+def test_save_path_refused_for_non_get(download_http, tmp_path):
+    r = _run_with_root({"url": "https://files.example.com/document",
+                        "method": "POST", "save_path": "document.pdf"}, tmp_path)
+    assert r.status == "error" and "only supported for GET" in r.error
+    assert download_http.calls == []
+    assert not (tmp_path / "document.pdf").exists()
+
+
+def test_oversized_download_leaves_no_partial_file(download_http, tmp_path):
+    download_http.resp = _Resp(
+        200, {"content-type": "application/octet-stream"},
+        [b"x" * M._MAX_WIRE_BYTES, b"overflow"])
+    r = _run_with_root({"url": "https://files.example.com/huge",
+                        "save_path": "downloads/huge.bin"}, tmp_path)
+    assert r.status == "error" and r.error.startswith("response_too_large:")
+    assert not (tmp_path / "downloads" / "huge.bin").exists()
+    assert not (tmp_path / "downloads").exists()

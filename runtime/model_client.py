@@ -99,6 +99,18 @@ class ModelTurnStalled(Exception):
     preserved, exactly like the budget_exceeded path."""
 
 
+class ContextWindowExceeded(RuntimeError):
+    """The request exceeded the serving model's context window (HTTP 400)."""
+
+
+def _is_context_window_error(status: int, body: str) -> bool:
+    text = body.lower()
+    return status == 400 and (
+        "contextwindowexceedederror" in text
+        or "maximum context length" in text
+        or ("context window" in text and "exceed" in text))
+
+
 def _sampler_body(sampling: dict | None) -> dict:
     """Whitelist sampler params for the /v1/chat/completions body, dropping
     None/unset keys. An empty/None input yields {} — i.e. send no sampler params,
@@ -479,8 +491,11 @@ class ModelClientMixin:
                                  "content": _TOOLCALL_JSON_NUDGE}],
                     tools_schema, model=model, think=think,
                     sampling=sampling, _retried_toolcall=True)
-            raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                               f"'{model}': {body_txt}")
+            error_message = (f"LiteLLM {r.status_code} for model "
+                             f"'{model}': {body_txt}")
+            if _is_context_window_error(r.status_code, body_txt):
+                raise ContextWindowExceeded(error_message)
+            raise RuntimeError(error_message)
         data = r.json()
         # A degenerate/empty completion (or a misbehaving backend — e.g. a
         # brain that returned nothing) can come back with no choices or a
@@ -589,7 +604,7 @@ class ModelClientMixin:
                                  model: str | None = None,
                                  think: bool = True,
                                  sampling: dict | None = None) -> dict:
-        """Like _model_turn, but streams the response. Calls `await on_token(text)`
+        """Like _model_turn, but streams the response. Calls `await on_token_wrapper(text)`
         for each content delta, assembles the streamed chunks back into the same
         {message, usage} shape the non-streaming path returns, and asks the proxy
         for usage via stream_options so cost still gets charged."""
@@ -610,7 +625,7 @@ class ModelClientMixin:
         reasoning_tail = ""
         _raw_on_token = on_token
 
-        async def on_token(text, kind):
+        async def on_token_wrapper(text, kind):
             nonlocal reasoning_tail
             if kind == "reasoning" and text:
                 reasoning_tail = (reasoning_tail + text)[-1200:]
@@ -643,7 +658,7 @@ class ModelClientMixin:
                         if emit:
                             content_parts.append(emit)
                             if on_token:
-                                await on_token(emit, "brain")
+                                await on_token_wrapper(emit, "brain")
                         pend = pend[len(pend) - keep:]
                         return
                     idx, open_tag = min(hits)
@@ -651,7 +666,7 @@ class ModelClientMixin:
                         seg = pend[:idx]
                         content_parts.append(seg)
                         if on_token:
-                            await on_token(seg, "brain")
+                            await on_token_wrapper(seg, "brain")
                     close = dict(tag_pairs)[open_tag]
                     pend = pend[idx + len(open_tag):]
                     in_think = close
@@ -661,11 +676,11 @@ class ModelClientMixin:
                         keep = _suffix_prefix_len(pend, in_think)
                         emit = pend[:len(pend) - keep]
                         if emit and on_token:
-                            await on_token(emit, "reasoning")
+                            await on_token_wrapper(emit, "reasoning")
                         pend = pend[len(pend) - keep:]
                         return
                     if idx > 0 and on_token:
-                        await on_token(pend[:idx], "reasoning")
+                        await on_token_wrapper(pend[:idx], "reasoning")
                     pend = pend[idx + len(in_think):]
                     in_think = None
 
@@ -692,8 +707,11 @@ class ModelClientMixin:
                             raise _ToolcallJson500
                         log.error("streaming model turn failed: HTTP %s — %s",
                                   r.status_code, body_txt)
-                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                           f"'{model}': {body_txt}")
+                        error_message = (f"LiteLLM {r.status_code} for model "
+                                         f"'{model}': {body_txt}")
+                        if _is_context_window_error(r.status_code, body_txt):
+                            raise ContextWindowExceeded(error_message)
+                        raise RuntimeError(error_message)
                     # Stall watchdog (zombie detector), bounding MODEL TURNS
                     # only — it can never fire during tool execution, where
                     # a long silent stretch (e.g. a specialist.delegate child) is
@@ -767,7 +785,7 @@ class ModelClientMixin:
                             # keeps the first-payload stamp branch-free
                             first_payload = first_payload or now
                             if on_token:
-                                await on_token(rc, "reasoning")
+                                await on_token_wrapper(rc, "reasoning")
                         if delta.get("content"):
                             last_payload = now
                             first_payload = first_payload or now
@@ -799,11 +817,11 @@ class ModelClientMixin:
             if pend:
                 if in_think:
                     if on_token:
-                        await on_token(pend, "reasoning")
+                        await on_token_wrapper(pend, "reasoning")
                 else:
                     content_parts.append(pend)
                     if on_token:
-                        await on_token(pend, "brain")
+                        await on_token_wrapper(pend, "brain")
             message: dict = {"role": "assistant",
                              "content": _strip_think("".join(content_parts),
                                                      self._think_family(model)).strip() or None}

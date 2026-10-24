@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from runtime.model_client import ModelClientMixin, _is_toolcall_json_500
+from runtime.model_client import ContextWindowExceeded, ModelClientMixin, _is_toolcall_json_500
 
 _LLAMACPP_500 = ('{"error":{"message":"litellm.InternalServerError: '
                  'OpenAIException - Failed to parse tool call arguments as '
@@ -176,6 +176,18 @@ def test_4xx_is_never_retried():
     assert len(rt.posts) == 1
 
 
+_CTX_400 = ('{"error":{"message":"litellm.ContextWindowExceededError: '
+            'OpenAIException - maximum context length is 65536 tokens"}}')
+
+
+def test_context_window_400_has_specific_type_and_no_retry():
+    rt = _FakeRT([_Resp(400, _CTX_400)])
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0, 0]}}
+    with pytest.raises(ContextWindowExceeded, match="LiteLLM 400"):
+        _turn(rt, [{"role": "user", "content": "hi"}])
+    assert len(rt.posts) == 1
+
+
 def test_detector_is_specific():
     assert _is_toolcall_json_500(500, _LLAMACPP_500)
     assert not _is_toolcall_json_500(408, _LLAMACPP_500)      # timeout ≠ parse
@@ -220,6 +232,15 @@ def test_streaming_toolcall_json_500_twice_is_a_hard_error():
         asyncio.run(rt._model_turn_streaming(
             [{"role": "user", "content": "hi"}], [], None))
     assert len(rt.stream_posts) == 2   # exactly one retry, never a loop
+
+
+def test_streaming_context_window_400_has_specific_type():
+    rt = _FakeRT([])
+    rt._stream_responses = [_StreamResp(400, _CTX_400)]
+    with pytest.raises(ContextWindowExceeded, match="LiteLLM 400"):
+        asyncio.run(rt._model_turn_streaming(
+            [{"role": "user", "content": "hi"}], [], None))
+    assert len(rt.stream_posts) == 1
 
 
 def test_streaming_other_500s_retry_then_raise():

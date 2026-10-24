@@ -232,9 +232,8 @@ class RunSettings:
     # default-config behavior is unchanged.
     verify_stall_after: int
     # Context-pressure guard: one-shot nudge when a turn's prompt reaches
-    # warn_fraction of the served window. run_overrides.context_tokens (the
-    # /imp ctxguard) wins over config — an impersonated model usually has a
-    # different served window. 0/unset disables.
+    # warn_fraction of the served window. Explicit run override wins, then
+    # active preset CTX_SIZE, then orchestrator.context_tokens; 0 disables.
     context_tokens: int
 
     def just_reply_armed(self, user_message, depth: int) -> bool:
@@ -255,7 +254,7 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     # global config and per-run overrides — precedence is always
     # run_overrides > preset profile > global config > built-in default, so
     # an unconfigured preset behaves exactly as before profiles existed.
-    from runtime.preset_store import profile_for
+    from runtime.preset_store import context_for_alias, profile_for
     _profile = profile_for(config, eff_model)
     b_cfg = {**config["budgets"], **(budget_overrides or {})}
     budget = Budget(
@@ -353,9 +352,13 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     max_bounces = _int(_ag.get("max_bounces_per_answer", 3), 3)
     verify_stall_after = _int_plain((_ag.get("verify", {}) or {})
                                     .get("stall_after", 2), 2)
-    ctx_tokens = _int(_ro.get("context_tokens")
-                      or (config.get("orchestrator") or {}).get("context_tokens")
-                      or 0, 0)
+    if "context_tokens" in _ro:
+        ctx_raw = _ro["context_tokens"]       # explicit 0 disables the guard
+    else:
+        ctx_raw = (context_for_alias(config, eff_model)
+                   or (config.get("orchestrator") or {}).get("context_tokens")
+                   or 0)
+    ctx_tokens = _int(ctx_raw, 0)
 
     return RunSettings(
         eff_model=eff_model, run_overrides=_ro, budget_cfg=b_cfg, budget=budget,

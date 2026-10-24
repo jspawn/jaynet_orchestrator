@@ -329,6 +329,32 @@ SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("vision", "local-vision"))
 
 
+def context_for_alias(config: dict, alias: str | None) -> int:
+    """CTX_SIZE of the preset serving `alias`, or 0 when unknown.
+
+    Slot aliases resolve through the ACTIVE slot, never the first preset that
+    happens to share the alias (old brains keep their eval/preset history).
+    Custom aliases are safe only when exactly one preset carries them."""
+    if not alias:
+        return 0
+    slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
+    if slot:
+        preset = resolve_slot(config, slot)
+    else:
+        presets = ((config or {}).get("models") or {}).get("presets") or {}
+        matches = [p for p in presets.values()
+                   if isinstance(p, dict) and p.get("alias") == alias]
+        preset = matches[0] if len(matches) == 1 else {}
+    path = preset.get("preset") or ""
+    if not path:
+        return 0
+    from runtime.serve_preset import preset_info
+    try:
+        return int(preset_info(path).get("ctx_size") or 0)
+    except (OSError, TypeError, ValueError):
+        return 0
+
+
 def vision_for_alias(config: dict, alias: str | None) -> bool:
     """Whether the model served under a local LiteLLM alias can see images.
     Reverse of SLOT_ALIASES: alias → slot → serving preset → caps.vision.

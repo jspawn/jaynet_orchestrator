@@ -265,8 +265,23 @@ def test_run_case_stub_tools_restricts_and_grades(tmp_path, monkeypatch):
     assert row["judge_model"] == "none (judge: off)"
     # run saw ONLY the stub tool (BFCL single-turn condition)
     assert rt.calls[0][1]["tools"] == ["bfcl.calc"]
+    assert rt.calls[0][1]["guards_off"] == ["just_reply"]
     # and the stub was unregistered afterwards
     assert "bfcl.calc" not in [t.name for t in rt.registry.all()]
+
+
+def test_run_case_stub_tools_preserves_variant_guards_off(tmp_path, monkeypatch):
+    rt = _StubRuntime()
+    db = _trace_db(tmp_path, [
+        ("fake-1", {"tool": "bfcl.calc", "status": "ok",
+                    "args": {"base": 10, "height": 5}}),
+    ])
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(
+        rt, _bfcl_case(), store,
+        variant={"label": "guard-ablation", "guards_off": ["deliverable"]}))
+    assert rt.calls[0][1]["guards_off"] == ["deliverable", "just_reply"]
 
 
 def test_run_case_stub_tools_mismatch_fails(tmp_path, monkeypatch):

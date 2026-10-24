@@ -35,8 +35,8 @@ META: dict[str, tuple[str, str]] = {
     # pre-turn (runtime/turn_guards.py PRE_TURN_GUARDS)
     "budget_warning": ("budgets.warn_fraction", "0.8"),
     "budget_final_notice": ("budgets.final_warn_fraction", "0.95"),
-    "context_warning": ("orchestrator.context_tokens (+ budgets.warn_fraction)",
-                        "262144 / 0.8"),
+    "context_warning": ("preset CTX_SIZE / orchestrator.context_tokens "
+                        "(+ budgets.warn_fraction)", "262144 / 0.8"),
     "stall_check": ("agent.stall_check.enabled / .after", "true / 2"),
     "deliverable_warn": ("agent.deliverable_check.enabled / .warn_at",
                          "true / 0.75"),

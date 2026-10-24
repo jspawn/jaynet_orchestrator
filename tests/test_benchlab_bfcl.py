@@ -57,6 +57,86 @@ def test_schema_type_mapping():
                                                                "height"]
 
 
+def test_schema_nested_drink_style():
+    row = {
+        "id": "live_simple_drink_0",
+        "question": [[{"role": "user",
+                       "content": "Make my drink large with boba."}]],
+        "function": [{
+            "name": "ChaDri_change_drink",
+            "parameters": {
+                "type": "dict",
+                "properties": {
+                    "drink": {
+                        "type": "dict",
+                        "description": "The requested drink.",
+                        "properties": {
+                            "size": {
+                                "type": "string",
+                                "description": "Cup size.",
+                                "enum": ["small", "large"],
+                            },
+                            "toppings": {
+                                "type": "array",
+                                "description": "Toppings to add.",
+                                "items": {
+                                    "type": "dict",
+                                    "description": "One topping.",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "enum": ["boba", "jelly"],
+                                        },
+                                        "quantity": {
+                                            "type": "integer",
+                                            "description": "Number of scoops.",
+                                        },
+                                    },
+                                    "required": ["name"],
+                                },
+                            },
+                        },
+                        "required": ["size"],
+                    },
+                },
+                "required": ["drink"],
+            },
+        }],
+    }
+    case = importer.bfcl_row_to_case("live_simple", row, [])
+    params = case["stub_tools"][0]["parameters"]
+    assert params["required"] == ["drink"]
+    assert params["properties"]["drink"] == {
+        "type": "object",
+        "description": "The requested drink.",
+        "properties": {
+            "size": {
+                "type": "string",
+                "description": "Cup size.",
+                "enum": ["small", "large"],
+            },
+            "toppings": {
+                "type": "array",
+                "description": "Toppings to add.",
+                "items": {
+                    "type": "object",
+                    "description": "One topping.",
+                    "properties": {
+                        "name": {"type": "string", "enum": ["boba", "jelly"]},
+                        "quantity": {
+                            "type": "integer",
+                            "description": "Number of scoops.",
+                        },
+                    },
+                    "required": ["name"],
+                },
+            },
+        },
+        "required": ["size"],
+    }
+    assert validate_case_dict(case["id"], case) == []
+
+
 def test_dotted_function_name_becomes_underscore():
     row = {"id": "parallel_0",
            "question": [[{"role": "user", "content": "play two songs"}]],

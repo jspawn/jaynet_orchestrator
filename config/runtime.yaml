@@ -39,11 +39,10 @@ orchestrator:
   # ~half of sampling.max_tokens. 0 = send nothing (server default). Local-only —
   # cloud providers reject unknown params, so it is never sent off-box.
   reasoning_budget_tokens: 0
-  # Served context size of the brain in tokens — keep in sync with the preset's
-  # CTX_SIZE. Feeds ONLY the context-pressure guard: when a turn's prompt
-  # reaches budgets.warn_fraction of this, the model gets a one-time "wrap up,
-  # checkpoint, don't re-read big files" nudge instead of the run dying on a
-  # server 400 when the window actually fills. 0/null disables the guard.
+  # Fallback context size in tokens. The active preset's CTX_SIZE wins; an
+  # explicit per-run override wins over both. Feeds ONLY the context-pressure
+  # guard: near budgets.warn_fraction, the model gets a one-time wrap-up nudge.
+  # 0/null disables the guard when no preset supplies a size.
   context_tokens: 262144
   # Server-side cap on replayed chat history (user/assistant messages). The
   # web UI replays the whole chat with each message, and every replayed turn

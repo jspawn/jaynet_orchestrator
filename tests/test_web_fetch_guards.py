@@ -199,6 +199,29 @@ def test_full_content_carries_no_hint(monkeypatch):
     assert "hint" not in r.result
 
 
+# ---- binary responses stay out of the model context ----
+def test_pdf_magic_rejected_even_with_text_mime(monkeypatch):
+    resp = _Resp([b"%PDF-1.7\n", b"\x00\x01binary"])
+    resp.headers = {"content-type": "text/plain; charset=utf-8"}
+    _stub_transport(monkeypatch, resp)
+    r = _run("https://example.com/document")
+    assert r.status == "error" and r.result is None
+    assert r.error.startswith("binary_response:")
+    assert "web.request(save_path=...)" in r.error
+
+
+@pytest.mark.parametrize("content_type", [
+    "application/pdf",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/png",
+    "audio/mpeg",
+    "video/mp4",
+])
+def test_common_binary_mime_types_detected(content_type):
+    assert M.is_binary_response(content_type + "; charset=binary", b"")
+
+
 # ---- hard byte cap ----
 def test_body_capped_at_max_bytes(monkeypatch):
     # 20 x 1 MiB on the wire; the reader must stop right past the cap, not
