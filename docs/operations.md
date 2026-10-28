@@ -27,7 +27,9 @@ scripts/orch --doctor                             # env, paths, ports, services
 The same information, live and prettier: **Admin → Status & Usage** (service
 health and hardware in Overview, run replay in Recent runs) and **Admin →
 Models → Servers** (per-server cards with
-auto-refreshing log tails, start/stop/restart).
+auto-refreshing log tails, start/stop/restart). Overview also warns about recent
+LiteLLM model fallbacks (requested → served alias, since the web restart), so a
+successful brain fallback cannot silently hide a specialist backend/template error.
 
 ## The chat console
 

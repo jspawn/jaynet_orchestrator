@@ -199,6 +199,16 @@ async function loadStatus(){
       <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${esc(detail)}</td>
       <td>${rk?`<button class="mini" data-restart="${rk}">restart</button>`:""}</td></tr>`;
   }).join("");
+  const fallbacks=d.model_fallbacks||[];
+  $("#fallbacks").hidden=!fallbacks.length;
+  $("#fallbacks").innerHTML=fallbacks.length
+    ? "<b>Model fallback detected</b> — the proxy answered with a different model. "
+      +"Check the requested backend and chat template; the fallback hides the original error. "
+      +"<div class='muted' style='font-size:11px;margin-top:4px'>Recent events since web restart:<br>"
+      +fallbacks.slice(-5).reverse().map(e=>
+        `${esc(new Date(e.ts*1000).toLocaleString())}: ${esc(e.requested)} → ${esc(e.served)}`
+      ).join("<br>")+"</div>"
+    : "";
   $("#storage").innerHTML=(d.storage||[]).map(s=>
     `<tr><td>${esc(s.name)}</td><td class="muted">${esc(s.path)}</td><td>${bytes(s.size_bytes)}</td></tr>`).join("")
     || "<tr><td class='muted'>no stores yet</td></tr>";

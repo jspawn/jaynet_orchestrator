@@ -1191,6 +1191,11 @@ def register(app, s):
                 "users": users.count(),
             },
             "services": services,
+            # Successful LiteLLM fallbacks otherwise hide the backend error.
+            # Expose only aliases/timestamp — never the eval attribution tag.
+            "model_fallbacks": [
+                {k: e.get(k) for k in ("ts", "requested", "served")}
+                for e in list(getattr(runtime, "_served_model_log", ()) or ())[-20:]],
             "models": sorted((runtime.cost_table or {}).keys()),
             "storage": storage,
         }
