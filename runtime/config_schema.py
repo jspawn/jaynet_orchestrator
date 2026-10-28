@@ -106,6 +106,13 @@ class RoutingNudgeConfig(_Section):
     }
 
 
+class RecallConfig(_Section):
+    enabled: bool = True
+    max_chars: int = 1600
+    collection: str | None = None
+    min_score: float = 0.5
+
+
 class ToolSelectionConfig(_Section):
     mode: str = "auto"
     core_namespaces: list[str] = [
@@ -114,6 +121,7 @@ class ToolSelectionConfig(_Section):
         "fs.list", "fs.read", "llm.call", "tools.load",
     ]
     max_expansions: int = 2
+    recall: RecallConfig = RecallConfig()
     # Keyword matching also scans the last N turns of the chat (bounded) so a
     # loaded namespace stays sticky across keyword-free follow-ups. 0 disables.
     history_turns: int = 3

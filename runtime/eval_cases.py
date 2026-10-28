@@ -40,6 +40,14 @@ Schema (see evals/ for examples):
     requires_tools: [graph.query]   # optional; case SKIPS (not fails) when a
                                     # listed tool isn't in the run's toolset —
                                     # e.g. plugin disabled on this install
+    tool_selection: static          # static safe allowlist (default) | auto selector
+    fixtures:                       # optional seed-only entries; no recall prefetch
+      memory: [{content: "a fact", kind: fact, tags: telescope, source: eval}]
+      rag: [{collection: telescope, source: manual, text: "evidence"}]
+    recall:                         # same fixtures, plus enables recall prefetch
+      collection: telescope         # default rag collection + recall_collection override
+      memory: [{content: "a fact"}]
+      rag: [{source: manual, text: "evidence"}]
     container:                      # optional; run the case inside a podman
       image: benchlab-tb-x-a1b2c3   # container (Terminal-Bench full mode):
       workdir: /app                 # required image tag + optional workdir
@@ -99,9 +107,10 @@ from tools.chain.engine import _NAME_OK
 log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
+TOOL_SELECTION_MODES = ("static", "auto")
 CASE_KEYS = ("id", "name", "tags", "driver", "turns", "expect",
              "judge_rubric", "judge", "requires_tools", "project", "container",
-             "budget", "stub_tools")
+             "budget", "stub_tools", "tool_selection", "fixtures", "recall")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
                "max_iterations", "ask_reply", "canary_not_in_tool_args",
@@ -109,6 +118,7 @@ EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
 PROJECT_KEYS = ("files", "graph", "seed_code")
 CONTAINER_KEYS = ("image", "workdir", "network", "compose", "client_service")
 BUDGET_KEYS = ("turn_wall_clock_s",)
+RECALL_KEYS = ("collection", "memory", "rag")
 # Podman image reference: name[:tag] or registry/name:tag — no spaces/shell
 # metacharacters (the tag is passed to podman argv verbatim).
 _IMAGE_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
@@ -129,6 +139,9 @@ class EvalCase:
     container: dict = field(default_factory=dict)       # {image, workdir, network, compose, client_service}
     budget: dict = field(default_factory=dict)          # {turn_wall_clock_s}
     stub_tools: list[dict] = field(default_factory=list)  # {name, description, parameters, result?}
+    tool_selection: str = "static"                      # static | auto
+    fixtures: dict = field(default_factory=dict)        # seed-only memory/rag entries
+    recall: dict = field(default_factory=dict)          # fixtures + prefetch collection
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -142,6 +155,9 @@ class EvalCase:
                 "container": self.container,
                 "budget": self.budget,
                 "stub_tools": self.stub_tools,
+                "tool_selection": self.tool_selection,
+                "fixtures": self.fixtures,
+                "recall": self.recall,
                 "origin": self.origin}
 
 
@@ -220,6 +236,36 @@ class _StubToolModel(BaseModel):
                 f"invalid stub tool name '{v}' (letters, digits, dot, "
                 "underscore)")
         return v
+
+
+class _MemoryFixtureModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: StrictStr
+    kind: StrictStr | None = None
+    tags: StrictStr | None = None
+    source: StrictStr | None = None
+
+
+class _RagFixtureModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    collection: StrictStr | None = None
+    source: StrictStr | None = None
+    text: StrictStr
+
+
+class _RecallModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    collection: StrictStr | None = None
+    memory: list[_MemoryFixtureModel] | None = None
+    rag: list[_RagFixtureModel] | None = None
+
+    @model_validator(mode="after")
+    def _rag_collection(self):
+        for item in self.rag or []:
+            if not (item.collection or self.collection):
+                raise ValueError("rag entries need a collection here or at "
+                                 "the fixture block's top level")
+        return self
 
 
 class _ProjectModel(BaseModel):
@@ -312,6 +358,9 @@ class _CaseModel(BaseModel):
     container: _ContainerModel | None = None
     budget: _BudgetModel | None = None
     stub_tools: list[_StubToolModel] | None = None
+    tool_selection: object = "static"
+    fixtures: _RecallModel | None = None
+    recall: _RecallModel | None = None
 
     @field_validator("id")
     @classmethod
@@ -336,6 +385,14 @@ class _CaseModel(BaseModel):
             raise ValueError(f"driver must be one of {DRIVERS}")
         return v
 
+    @field_validator("tool_selection")
+    @classmethod
+    def _tool_selection_known(cls, v):
+        if v not in TOOL_SELECTION_MODES:
+            raise ValueError(
+                f"tool_selection must be one of {TOOL_SELECTION_MODES}")
+        return v
+
     @field_validator("turns")
     @classmethod
     def _turns_required(cls, v):
@@ -357,7 +414,8 @@ _EXPECT_LIST_KEYS = ("must_use_tools", "must_use_any_tools",
                      "must_not_use_tools", "answer_contains_any",
                      "answer_exact_any", "canary_not_in_tool_args")
 _SECTION_KEYS = {"expect": EXPECT_KEYS, "project": PROJECT_KEYS,
-                 "container": CONTAINER_KEYS, "budget": BUDGET_KEYS}
+                 "container": CONTAINER_KEYS, "budget": BUDGET_KEYS,
+                 "fixtures": RECALL_KEYS, "recall": RECALL_KEYS}
 # Non-validator wording, keyed (section, field) — validators raise their own
 # exact messages; these cover pydantic's type/missing/pattern errors.
 _LOC_MSG = {
@@ -431,6 +489,8 @@ def _fmt_error(err) -> str:
         return "name is required"
     if loc == ("driver",):
         return f"driver must be one of {DRIVERS}"
+    if loc == ("tool_selection",):
+        return f"tool_selection must be one of {TOOL_SELECTION_MODES}"
     if loc == ("judge_rubric",):
         return "judge_rubric is required (the judge grades against it)"
     return msg
@@ -476,6 +536,9 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         container=dict(raw.get("container") or {}),
         budget=dict(raw.get("budget") or {}),
         stub_tools=[dict(t) for t in (raw.get("stub_tools") or [])],
+        tool_selection=raw.get("tool_selection", "static"),
+        fixtures=dict(raw.get("fixtures") or {}),
+        recall=dict(raw.get("recall") or {}),
         origin=origin,
     )
 

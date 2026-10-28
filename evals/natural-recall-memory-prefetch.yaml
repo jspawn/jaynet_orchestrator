@@ -1,0 +1,18 @@
+name: Explicit memory question uses natural recall
+tags: [recall, memory, auto-tools]
+tool_selection: auto
+judge: false
+turns:
+  - user: "What do you remember about my telescope?"
+recall:
+  collection: telescope
+  memory:
+    - content: "My telescope is an 8-inch Dobsonian reflector."
+      kind: fact
+      tags: telescope
+      source: natural-recall-eval
+requires_tools: [memory.search]
+expect:
+  must_use_tools: [memory.search]
+  answer_contains_any: ["8-inch Dobsonian"]
+  max_iterations: 6

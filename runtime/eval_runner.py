@@ -1099,6 +1099,38 @@ def _canary_leaks(run_ids: list[str], needles: list[str]) -> list[str]:
     return failures
 
 
+def _traced_tool_selection(run_id: str) -> set[str] | None:
+    """Actual tools exposed to one run, including later tools.load additions."""
+    if not run_id:
+        return None
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{paths.TRACE_DB}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT payload_json FROM events WHERE run_id=? "
+                "AND kind='tool_selection' ORDER BY ts", (run_id,)).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    available: set[str] | None = None
+    for (payload,) in rows:
+        try:
+            data = json.loads(payload)
+        except Exception:
+            continue
+        initial = data.get("available")
+        if isinstance(initial, list):
+            if available is None:
+                available = set()
+            available.update(str(name) for name in initial)
+        added = data.get("added")
+        if available is not None and isinstance(added, list):
+            available.update(str(name) for name in added)
+    return available
+
+
 # loop.py marks gate-refused tool calls in the run's tools-called list with
 # this literal suffix; executed calls stay bare. A blocked call never ran —
 # grading must not count it as fired (or as a call at all).
@@ -1483,8 +1515,13 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
                          "answers): " + payload[:_ASK_EXCHANGE_CAP])
     if state:
         avail = state.get("available_tools") or []
-        lines.append(f"AVAILABLE TOOLS this run could call ({len(avail)}) — "
-                     "authoritative:\n" + ", ".join(sorted(avail)))
+        if state.get("available_tools_known", True):
+            lines.append(f"AVAILABLE TOOLS this run could call ({len(avail)}) — "
+                         "authoritative:\n" + ", ".join(sorted(avail)))
+        else:
+            lines.append("AVAILABLE TOOLS: unknown — the run's "
+                         "tool_selection trace was unavailable; do not assume "
+                         "the unattended-safe universe was exposed")
         descs = state.get("tool_descriptions") or {}
         if descs:
             lines.append("TOOL DESCRIPTIONS (rubric-relevant + tools the "
@@ -1823,6 +1860,58 @@ def _project_prefix(case: EvalCase, files_root: Path) -> str:
     return prefix
 
 
+async def _seed_recall(runtime, case: EvalCase, run_overrides: dict,
+                       work_root: str, project_id: str | None) -> None:
+    """Seed only the case's redirected stores, before the first agent turn."""
+    if not case.fixtures and not case.recall:
+        return
+    from runtime.budget import Budget
+    from runtime.loop import _patch_run_config
+    from runtime.tool_base import ToolContext
+    from tools.memory.store import MemoryAppend
+    from tools.rag.store import RagIndex
+
+    ctx = ToolContext(
+        request_id=f"eval-{case.id}-fixture-seed",
+        config=_patch_run_config(runtime.config,
+                                 run_overrides.get("tools_patch"),
+                                 run_overrides.get("config_patch")),
+        budget=Budget(max_iterations=0, max_wall_clock_s=0,
+                      max_cost_usd=0, max_total_tokens=0),
+        owner=_EVAL_OWNER, is_admin=True,
+        work_root=work_root, project_id=project_id)
+    for block_name, block in (("fixtures", case.fixtures),
+                              ("recall", case.recall)):
+        for i, entry in enumerate(block.get("memory") or [], 1):
+            args = {k: entry[k] for k in ("content", "kind", "tags", "source")
+                    if entry.get(k) is not None}
+            try:
+                result = await MemoryAppend().execute(args, ctx)
+            except Exception as e:
+                raise RuntimeError(
+                    f"eval case {case.id}: {block_name}.memory[{i}] "
+                    f"seed raised {type(e).__name__}: {e}") from e
+            if result.status != "ok":
+                raise RuntimeError(
+                    f"eval case {case.id}: {block_name}.memory[{i}] "
+                    f"seed failed: {result.error or result.result}")
+        for i, entry in enumerate(block.get("rag") or [], 1):
+            args = {k: entry[k] for k in ("text", "source")
+                    if entry.get(k) is not None}
+            args["collection"] = (entry.get("collection")
+                                  or block.get("collection"))
+            try:
+                result = await RagIndex().execute(args, ctx)
+            except Exception as e:
+                raise RuntimeError(
+                    f"eval case {case.id}: {block_name}.rag[{i}] "
+                    f"seed raised {type(e).__name__}: {e}") from e
+            if result.status != "ok":
+                raise RuntimeError(
+                    f"eval case {case.id}: {block_name}.rag[{i}] "
+                    f"seed failed: {result.error or result.result}")
+
+
 # ---- the runner ---------------------------------------------------------------
 
 def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
@@ -1858,11 +1947,14 @@ class _CaseRun:
     variant: dict | None
     ecfg: dict
     guards_off: list[str]
-    tools: list[str]
+    tools: list[str] | None
     budget: dict
     ask_reply: str
     started: float
     case_t0: float
+    disabled_tools: set[str] | None = None
+    available_tools: set[str] = field(default_factory=set)
+    availability_events: int = 0
     total_cost: float = 0.0
     total_tokens: int = 0
     prompt_tokens: int = 0      # cache telemetry (#4a): per-case sums the
@@ -1927,28 +2019,35 @@ async def _setup_case_run(runtime, case: EvalCase,
                     f"eval case {case.id}: stub tool name '{st.name}' collides "
                     "with an already-registered tool — rename the stub")
             stub_names.append(st.name)
-        tools = _unattended_tools(runtime, disabled_tools)
+        safe_tools = _unattended_tools(runtime, disabled_tools)
+        fixed = bool(stub_names)
         if stub_names:
-            tools = list(stub_names)
+            safe_tools = list(stub_names)
             # Zero calls are correct for irrelevance rows; this guard would
             # demand code.run/web.search, which stub-only runs do not expose.
             if "just_reply" not in guards_off:
                 guards_off.append("just_reply")
         if (variant or {}).get("harness") == "brain":
-            tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
+            safe_tools = [t for t in safe_tools
+                          if t not in _BRAIN_VARIANT_EXCLUDED]
         # Control arms (docs/harness-lessons.md #1): tools_only restricts
         # the run to exactly these tools — intersected with the
         # unattended-safe set above, so a variant can never smuggle a
         # confirmation-gated tool in. ["code.run"] = the bash-only control.
         tools_only = _tools_only_of(runtime, variant)
         if tools_only is not None:
+            fixed = True
             keep = set(tools_only)
-            tools = [t for t in tools if t in keep]
+            safe_tools = [t for t in safe_tools if t in keep]
+        auto = case.tool_selection == "auto" and not fixed
+        tools = None if auto else safe_tools
+        run_disabled = ({t.name for t in runtime.registry.all()}
+                        - set(safe_tools)) if auto else None
         # base_system swaps the whole system prompt (prompts/<name>.md) —
         # the gate prompt's routing doctrine advertises tools the control
         # arm doesn't have. Validated + resolved HERE, at case load.
         base_system = _base_system_of(variant)
-        missing = [t for t in (case.requires_tools or []) if t not in tools]
+        missing = [t for t in (case.requires_tools or []) if t not in safe_tools]
         if missing:
             # Skippable-by-design cases (e.g. plugin tools): an install without
             # the plugin can never satisfy the rubric — skip, don't fail.
@@ -1984,10 +2083,49 @@ async def _setup_case_run(runtime, case: EvalCase,
         return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
                         guards_off=guards_off, tools=tools, budget=budget,
                         ask_reply=ask_reply, started=started, case_t0=case_t0,
+                        disabled_tools=run_disabled,
+                        available_tools=set() if auto else set(safe_tools),
                         stub_names=stub_names, base_system=base_system), None
     except Exception:
         _unregister_stubs()
         raise
+
+
+async def _sandbox_overrides(runtime, case: EvalCase, tools: list[str] | None,
+                             sandbox: str
+                             ) -> tuple[dict, str | None, str, dict | None]:
+    """Build sandboxed run overrides and seed project/recall fixtures."""
+    # Persistent stores redirect into the sandbox (audit S2): eval runs must
+    # not pollute real memory/rag DBs or leak real memories to a cloud judge.
+    tools_patch = {"memory": {"db_path": str(Path(sandbox) / "memory.db")},
+                   "rag": {"db_path": str(Path(sandbox) / "rag.db")}}
+    selection_patch: dict[str, Any] = {
+        "recall": {"enabled": bool(case.recall)}}
+    if tools is None:
+        selection_patch["mode"] = "auto"
+    config_patch = {"tool_selection": selection_patch}
+    run_overrides = {
+        "tools_patch": tools_patch,
+        "config_patch": config_patch,
+        "recall_collection": case.recall.get("collection"),
+        "recall_query": "",
+    }
+    project_id = None
+    work_root = sandbox
+    if case.project:
+        project_id, work_root, cfg_patch = await asyncio.to_thread(
+            _seed_project, sandbox, case)
+        for section, values in cfg_patch.items():
+            config_patch.setdefault(section, {}).update(values)
+        if case.project.get("graph"):
+            err = await _prebuild_graph(
+                runtime.config, cfg_patch["web"]["projects_dir"], project_id)
+            if err:
+                early = {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                         "note": f"graph prebuild failed: {err}"}
+                return run_overrides, project_id, work_root, early
+    await _seed_recall(runtime, case, run_overrides, work_root, project_id)
+    return run_overrides, project_id, work_root, None
 
 
 async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
@@ -2019,25 +2157,11 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
 
     with tempfile.TemporaryDirectory(prefix=f"eval-{case.id}-",
                                      ignore_cleanup_errors=True) as sandbox:
-        # Persistent stores redirect into the sandbox (audit S2): eval runs
-        # must not pollute the user's real memory/rag DBs, and real user
-        # memories must not leak into a cloud-judged transcript.
-        tools_patch = {"memory": {"db_path": str(Path(sandbox) / "memory.db")},
-                       "rag": {"db_path": str(Path(sandbox) / "rag.db")}}
-        run_overrides = {"tools_patch": tools_patch}
-        project_id = None
-        work_root = sandbox
-        if case.project:
-            project_id, work_root, cfg_patch = await asyncio.to_thread(
-                _seed_project, sandbox, case)
-            run_overrides["config_patch"] = cfg_patch
-            if case.project.get("graph"):
-                err = await _prebuild_graph(
-                    runtime.config, cfg_patch["web"]["projects_dir"], project_id)
-                if err:
-                    return {"test_id": case.id, "skipped": True,
-                            "cost_usd": 0.0,
-                            "note": f"graph prebuild failed: {err}"}
+        run_overrides, project_id, work_root, early = await _sandbox_overrides(
+            runtime, case, tools, sandbox)
+        if early is not None:
+            return early
+        tools_patch = run_overrides["tools_patch"]
         if variant and variant.get("sampling"):
             run_overrides["sampling"] = dict(variant["sampling"])
             # Cross-model variants must still get the pinned sampling —
@@ -2106,6 +2230,7 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                          else len(pending))
             while pending and len(transcript) < max_turns:
                 message = pending.pop(0)
+                turn_overrides = {**run_overrides, "recall_query": message}
                 if case.project and not transcript:
                     # Mirror the web layer's project context (banner + file tree +
                     # plugin hints) on the first turn — otherwise the agent gets
@@ -2124,6 +2249,7 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     share_private=False,
                     budget_overrides={**budget, "max_cost_usd": remaining},
                     tools=tools,
+                    disabled_tools=ctx.disabled_tools,
                     confirm_provider=_EvalConfirm(),
                     ask_provider=ask_provider,
                     history=history or None,
@@ -2133,7 +2259,7 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     is_admin=True,
                     work_root=work_root,
                     project_id=project_id,
-                    run_overrides=run_overrides,
+                    run_overrides=turn_overrides,
                     model=(variant or {}).get("model") or None,
                     extra_system=experiment.get("prompt_addition") or None,
                     base_system=ctx.base_system,
@@ -2143,6 +2269,11 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     guards_off=guards_off or None,
                 )
                 run_ids.append(result.get("run_id") or "")
+                if tools is None:
+                    selected = _traced_tool_selection(run_ids[-1])
+                    if selected is not None:
+                        ctx.availability_events += 1
+                        ctx.available_tools.update(selected)
                 # Outage brake: a dead model backend fails every later case
                 # instantly — stop the suite instead of poisoning the queue.
                 # But first give a TRANSIENT outage (litellm restart on a
@@ -2229,9 +2360,12 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     checker_failures = ctx.checker_failures
     total_cost = ctx.total_cost
     total_tokens = ctx.total_tokens
+    available: set[str] | None = set(ctx.available_tools)
+    if tools is None and ctx.availability_events != len(run_ids):
+        available = None
 
     check_failures = checker_failures + check_expectations(
-        case, transcript, available=set(tools))
+        case, transcript, available=available)
     exp = case.expect or {}
     check_failures += _canary_leaks(
         run_ids, exp.get("canary_not_in_tool_args") or [])
@@ -2280,7 +2414,8 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     # judge is guessing — a state-blind judge misdiagnosed harness toolset
     # exclusions as prompt problems (fs.write/llm.call were never exposed).
     state = {
-        "available_tools": tools,
+        "available_tools": sorted(available) if available is not None else None,
+        "available_tools_known": available is not None,
         "system_prompt": system_prompt,
         "tool_descriptions": tool_descriptions,
         "skill_bodies": skill_bodies,

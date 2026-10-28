@@ -1063,6 +1063,7 @@ def register(app, s):
                 pass
 
         message = _augment_with_attachments(request, req.message, req.attachments)
+        recall_query = message
         message = _augment_with_project(request, message, req.project_id)
         images = (_image_urls_for(request, req.attachments)
                   if getattr(runtime, "vision_enabled", False) else None)
@@ -1077,7 +1078,8 @@ def register(app, s):
                    "sampling": req.sampling,
                    "sub_budget": req.sub_budget,
                    "architect_threshold": req.architect_threshold},
-            extra_system=extra_system, extra_roots=extra_roots, images=images)
+            extra_system=extra_system, extra_roots=extra_roots, images=images,
+            run_overrides_extra={"recall_query": recall_query})
         return {"run_id": run_id}
 
     # ---- voice channel (native/voice clients; server-managed conversation) ----
@@ -1169,7 +1171,8 @@ def register(app, s):
                 history=_history_from_turns(turns),
                 owner=owner, is_admin=bool(_user(request).get("is_admin")),
                 work_root=(str(_wr) if _wr else None),
-                project_id=project_id, scratch_key=conversation_id, stream=True)
+                project_id=project_id, scratch_key=conversation_id, stream=True,
+                run_overrides={"recall_query": req.text})
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),
                               "run_id": run_id, "status": result.get("status")})

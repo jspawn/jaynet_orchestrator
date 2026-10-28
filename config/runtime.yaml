@@ -807,6 +807,11 @@ tool_selection:
   # Cap on mid-run toolset expansions via tools.load. Each expansion rebuilds
   # the tool schema and busts the prompt-cache prefix once, so keep it small.
   max_expansions: 2
+  recall:
+    enabled: true             # depth-0 memory recall on explicit recall intent
+    max_chars: 1600           # total injected evidence, including labels
+    collection: null          # automatic RAG is off until a collection is named
+    min_score: 0.5            # cosine floor; calibrate for the active embedder
   # Keyword matching also scans the last N turns of the chat (bounded) so a
   # loaded namespace stays sticky across a conversation — a follow-up like
   # "now their email" carries no keyword itself. 0 disables.

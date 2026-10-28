@@ -2153,3 +2153,204 @@ def test_judge_no_flag_on_provider_prefix(monkeypatch):
     out = run(eval_runner._judge({}, cfg, _case(), [_turn()], [], None))
     assert out["pass"] is True
     assert "silently answered" not in out["notes"]
+
+
+# ---- natural recall: auto selection and sandbox fixtures -----------------------
+
+
+def test_parse_tool_selection_and_recall_fixtures_roundtrip():
+    import yaml
+    text = _VALID + """
+tool_selection: auto
+fixtures:
+  memory:
+    - content: seed-only fact
+      kind: fact
+recall:
+  collection: telescope
+  memory:
+    - content: prefetched fact
+      tags: telescope optics
+      source: eval
+  rag:
+    - source: manual
+      text: Let the telescope cool for 20 minutes.
+"""
+    case = parse_case("demo", text, "builtin")
+    assert case.tool_selection == "auto"
+    assert case.fixtures["memory"][0]["content"] == "seed-only fact"
+    assert case.recall["collection"] == "telescope"
+    assert case.to_dict()["fixtures"] == case.fixtures
+    assert case.to_dict()["recall"] == case.recall
+    default = parse_case("demo", _VALID, "builtin")
+    assert default.tool_selection == "static"
+    assert default.fixtures == {} and default.recall == {}
+    for extra, needle in [
+        ("tool_selection: sometimes\n", "tool_selection"),
+        ("recall: {bogus: true}\n", "unknown recall key"),
+        ("recall: {rag: [{text: evidence}]}\n", "collection"),
+        ("fixtures: {memory: [{content: 42}]}\n", "string"),
+    ]:
+        raw = yaml.safe_load(_VALID + extra)
+        errors = validate_case_dict("demo", raw)
+        assert any(needle in error for error in errors), errors
+
+
+def test_run_case_auto_uses_selector_with_safe_complement(tmp_path):
+    rt = _mini_runtime(confirm_on=True)
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(tool_selection="auto", judge=False, expect={})
+    run(eval_runner.run_case(rt, case, store))
+    kwargs = rt.calls[0][1]
+    assert kwargs["tools"] is None
+    assert kwargs["disabled_tools"] == {"fs.delete", "eval.run"}
+    patch = kwargs["run_overrides"]["config_patch"]
+    assert patch["tool_selection"]["mode"] == "auto"
+    assert patch["tool_selection"]["recall"] == {"enabled": False}
+    assert kwargs["run_overrides"]["recall_collection"] is None
+    assert kwargs["run_overrides"]["recall_query"] == "hi"
+    store.close()
+
+
+def test_run_case_auto_fixed_tools_only_takes_precedence(tmp_path):
+    rt = _mini_runtime(confirm_on=True)
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(tool_selection="auto", judge=False, expect={})
+    run(eval_runner.run_case(
+        rt, case, store, variant={"label": "fixed", "tools_only": ["fs.read"]}))
+    kwargs = rt.calls[0][1]
+    assert kwargs["tools"] == ["fs.read"]
+    assert kwargs["disabled_tools"] is None
+    assert "mode" not in kwargs["run_overrides"]["config_patch"]["tool_selection"]
+    store.close()
+
+
+def test_run_case_auto_requires_tools_retains_safe_universe_skip(tmp_path):
+    rt = _mini_runtime(confirm_on=True)
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(tool_selection="auto", requires_tools=["fs.delete"])
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "fs.delete" in row["note"]
+    assert rt.calls == []
+    store.close()
+
+
+def test_run_case_recall_seeding_config_and_raw_query(tmp_path, monkeypatch):
+    import sqlite3
+
+    from tools.rag import store as rag_store
+    embed_calls = []
+
+    async def fake_embed(texts, _ctx):
+        embed_calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(rag_store, "_embed", fake_embed)
+
+    class _RecallProbeRuntime(_FakeRuntime):
+        async def run(self, message, **kwargs):
+            paths_patch = kwargs["run_overrides"]["tools_patch"]
+            con = sqlite3.connect(paths_patch["memory"]["db_path"])
+            self.memory_rows = con.execute(
+                "SELECT content, kind, tags, source, owner FROM memory "
+                "ORDER BY id").fetchall()
+            con.close()
+            con = sqlite3.connect(paths_patch["rag"]["db_path"])
+            self.rag_rows = con.execute(
+                "SELECT collection, source, text, owner FROM rag_doc").fetchall()
+            con.close()
+            return await super().run(message, **kwargs)
+
+    rt = _RecallProbeRuntime(["20 minutes"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(
+        tool_selection="auto", judge=False, expect={},
+        turns=["How long should it cool?"],
+        project={"files": {"note.txt": "fixture"}},
+        fixtures={"memory": [{"content": "seed-only fact", "kind": "fact"}]},
+        recall={
+            "collection": "telescope",
+            "memory": [{"content": "prefetched fact", "tags": "optics",
+                        "source": "eval"}],
+            "rag": [{"source": "manual",
+                     "text": "Cool the telescope for 20 minutes."}],
+        })
+    run(eval_runner.run_case(rt, case, store))
+    kwargs = rt.calls[0][1]
+    overrides = kwargs["run_overrides"]
+    assert overrides["recall_query"] == "How long should it cool?"
+    assert overrides["recall_collection"] == "telescope"
+    assert overrides["config_patch"]["web"]["projects_dir"].endswith("projects")
+    assert overrides["config_patch"]["tool_selection"]["recall"] == {"enabled": True}
+    assert rt.memory_rows == [
+        ("seed-only fact", "fact", "", "", "_eval"),
+        ("prefetched fact", "note", "optics", "eval", "_eval"),
+    ]
+    assert rt.rag_rows == [(
+        "telescope", "manual", "Cool the telescope for 20 minutes.", "_eval")]
+    assert embed_calls == [["Cool the telescope for 20 minutes."]]
+    assert kwargs["tools"] is None
+    assert json.loads(store.results("demo")[0]["transcript"])[0]["tools"] == [
+        "web.search"]
+    store.close()
+
+
+def test_run_case_fixture_only_leaves_recall_disabled(tmp_path):
+    rt = _FakeRuntime(["ok"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(judge=False, expect={},
+                 fixtures={"memory": [{"content": "model must search"}]})
+    run(eval_runner.run_case(rt, case, store))
+    patch = rt.calls[0][1]["run_overrides"]["config_patch"]
+    assert patch["tool_selection"]["recall"] == {"enabled": False}
+    assert rt.calls[0][1]["run_overrides"]["recall_collection"] is None
+    store.close()
+
+
+def test_run_case_recall_seed_failure_is_loud(tmp_path, monkeypatch):
+    from tools.rag import store as rag_store
+
+    async def failed_embed(_texts, _ctx):
+        raise OSError("embedder offline")
+
+    monkeypatch.setattr(rag_store, "_embed", failed_embed)
+    rt = _FakeRuntime(["must not run"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(recall={"collection": "telescope",
+                         "rag": [{"text": "evidence"}]})
+    with pytest.raises(RuntimeError, match="recall.rag.*embedder offline"):
+        run(eval_runner.run_case(rt, case, store))
+    assert rt.calls == []
+    store.close()
+
+
+def test_run_case_auto_grades_actual_or_unknown_availability(
+        tmp_path, monkeypatch):
+    import sqlite3
+    db = tmp_path / "trace.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
+                " iteration INTEGER, payload_json TEXT)")
+    con.execute("INSERT INTO events(run_id, ts, kind, payload_json) "
+                "VALUES ('fake-1', 0, 'tool_selection', ?)",
+                (json.dumps({"available": ["fs.read"]}),))
+    con.commit()
+    con.close()
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    case = _case(tool_selection="auto", judge=False,
+                 expect={"must_use_tools": ["fs.write"]})
+    rt = _mini_runtime(confirm_on=True)
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, case, store))
+    assert any("not available" in failure
+               for failure in row["check_failures"])
+    store.close()
+
+    monkeypatch.setattr(paths, "TRACE_DB", tmp_path / "missing.db")
+    rt2 = _mini_runtime(confirm_on=True)
+    store2 = EvalStore(tmp_path / "eval2.db")
+    row2 = run(eval_runner.run_case(rt2, case, store2))
+    assert row2["check_failures"] == [
+        "expected tool 'fs.write' was never called"]
+    store2.close()

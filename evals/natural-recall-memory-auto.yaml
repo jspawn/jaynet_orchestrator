@@ -1,0 +1,17 @@
+name: Natural memory search without recall prefetch
+tags: [recall, memory, auto-tools]
+tool_selection: auto
+judge: false
+turns:
+  - user: "Which eyepiece did I pick for lunar viewing?"
+fixtures:
+  memory:
+    - content: "For lunar viewing with my telescope, I picked the 25 mm Plössl eyepiece."
+      kind: fact
+      tags: telescope optics
+      source: natural-recall-eval
+requires_tools: [memory.search]
+expect:
+  must_use_tools: [memory.search]
+  answer_contains_any: ["25 mm"]
+  max_iterations: 6

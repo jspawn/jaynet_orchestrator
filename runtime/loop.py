@@ -1439,7 +1439,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 auto_confirm=auto_confirm, run_id=run_id,
                 confirm_provider=confirm_provider)
 
+        from runtime.recall import prefetch_recall, raw_recall_query
         try:
+            await prefetch_recall(
+                self, rs, ctx,
+                query=raw_recall_query(_ro.get("recall_query"), user_message),
+                collection=_ro.get("recall_collection"), depth=depth,
+                disabled_tools=disabled_tools, emit=emit, emit_cost=emit_cost)
             while True:
                 rs.budget.tick()
                 # In-place transcript compaction (opt-in, cadence-gated to

@@ -1,0 +1,16 @@
+name: Scoped telescope evidence uses natural RAG recall
+tags: [recall, rag, auto-tools]
+tool_selection: auto
+judge: false
+turns:
+  - user: "Retrieve my telescope notes: how long should I cool it before observing?"
+recall:
+  collection: telescope
+  rag:
+    - source: telescope-manual
+      text: "Before observing, let the telescope cool outdoors for 20 minutes so its optics reach the ambient temperature."
+requires_tools: [rag.search]
+expect:
+  must_use_tools: [rag.search]
+  answer_contains_any: ["20 minutes"]
+  max_iterations: 6

@@ -91,6 +91,19 @@ def test_mutating_tools_are_gated():
         assert not reg.get(name).requires_confirmation, f"{name} should not be gated"
 
 
+def test_trivial_selection_keeps_core_memory_search():
+    """Short recall questions must not strip the advertised core memory tool."""
+    from runtime.selector import ToolSelector
+    reg = ToolRegistry("tools")
+    reg.discover()
+    sel = ToolSelector(reg, {"tool_selection": {
+        "mode": "auto", "core_namespaces": ["memory.search"],
+        "keyword_namespaces": {}}})
+    out = sel.select("What is my favourite telescope?", None)
+    assert "memory.search" in out
+    assert sel._diag["trivial"] is True
+
+
 def test_category_aliases_resolve_against_real_registry():
     """Every namespace named in CATEGORY_ALIASES must expand to ≥1 real tool —
     this is the vocabulary the gate prompt and tools.load advertise."""
