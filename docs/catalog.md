@@ -21,7 +21,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (120 advertised + 6 hidden legacy aliases)
+## Tools (122 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -195,9 +195,11 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `kg.add_relation` | Add a directed relation src -[rel]-> dst. Both entities are auto-created if missing. Example: src='qwen3-35b', rel='quantized_as',… | private |
-| `kg.neighbors` | Return the subgraph around an entity: outgoing and incoming relations up to `depth` hops. Use to traverse how things connect. Scop… | private |
-| `kg.query` | Look up entities by name (exact or substring) and/or type. Returns entities with their attributes. Scoped to YOUR entities; all_ow… | private |
-| `kg.remove_relation` | Remove a specific relation src -[rel]-> dst. | private, confirm |
+| `kg.alias` | Map an alternate entity name to a canonical entity. Future reads and writes resolve the alias. merge=true also merges an existing… | private |
+| `kg.associate` | Record entities recalled or used together. Strengthens each undirected pair; later kg.neighbors calls return them as related conte… | private |
+| `kg.neighbors` | Return the subgraph around an entity: outgoing and incoming relations up to `depth` hops plus weight-sorted related context. Alias… | private |
+| `kg.query` | Look up entities by name (exact or substring) and/or type. Returns entities with attributes and aliases. Scoped to YOUR entities;… | private |
+| `kg.remove_relation` | Remove a specific relation src -[rel]-> dst. Aliases are resolved. | private, confirm |
 | `kg.upsert_entity` | Create or update a typed entity with JSON attributes. attrs are merged into any existing attrs. Use for things you want to track:… | private |
 
 ### lint

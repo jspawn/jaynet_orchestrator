@@ -263,7 +263,8 @@ class RagSearch(Tool):
     name = "rag.search"
     description = ("Retrieve the most relevant chunks for a query from a collection "
                   "(or all collections). Returns text + similarity score + source. "
-                  "Set rerank=true to re-order with the configured reranker. "
+                  "Set rerank=true to re-order with the configured reranker, or "
+                  "min_score to reject weak evidence and require abstention. "
                   "Nothing relevant in the chunks → say exactly that the "
                   "collection does not cover it — do not interpolate. Scoped to "
                   "YOUR chunks; all_owners=true is an admin/debug escape hatch "
@@ -283,6 +284,9 @@ class RagSearch(Tool):
                            "Omit to search all."},
             "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 30},
             "rerank": {"type": "boolean", "default": False},
+            "min_score": {"type": "number", "default": -1, "minimum": -1, "maximum": 1,
+                          "description": "Optional minimum cosine score. If no chunk "
+                                         "passes, abstain instead of inferring an answer."},
             "all_owners": {"type": "boolean", "default": False,
                            "description": "Admin/debug escape hatch: search all "
                                           "users' chunks instead of only your own."},
@@ -339,15 +343,19 @@ class RagSearch(Tool):
         norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8
         sims = (mat / norms) @ qn
         top_k = min(int(args.get("top_k", 5)), len(rows))
+        min_score = float(args.get("min_score", -1))
+        # Threshold before reranking: a reranker must not resurrect weak evidence.
+        eligible = [i for i in np.argsort(-sims) if sims[i] >= min_score]
+        below_threshold = len(rows) - len(eligible)
         # over-fetch when reranking so the reranker has candidates to work with
-        fetch = min(len(rows), top_k * 4 if args.get("rerank") else top_k)
-        order = np.argsort(-sims)[:fetch]
+        fetch = min(len(eligible), top_k * 4 if args.get("rerank") else top_k)
+        order = eligible[:fetch]
 
         cand = [{"id": int(rows[i]["id"]), "collection": rows[i]["collection"],
                  "source": rows[i]["source"], "score": round(float(sims[i]), 4),
                  "text": rows[i]["text"]} for i in order]
 
-        if args.get("rerank"):
+        if args.get("rerank") and cand:
             try:
                 new_order = await _rerank(args["query"], [c["text"] for c in cand], ctx)
                 if new_order:
@@ -359,6 +367,13 @@ class RagSearch(Tool):
             if len(c["text"]) > 800:
                 c["text"] = c["text"][:800] + "…"
         result = {"query": args["query"], "count": len(cand), "matches": cand}
+        if "min_score" in args:
+            result["min_score"] = min_score
+            result["below_threshold"] = below_threshold
+            if not cand:
+                result["note"] = (
+                    f"no chunks met min_score={min_score}; the collection does not "
+                    "cover this query at the requested confidence — do not infer an answer.")
         # Knowledge-surface bridge: a project-bound run lets plugins (the
         # graphify project graph) attach a compact excerpt of project-local
         # structure related to the hits. owner/pid/projects_dir come from the

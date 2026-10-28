@@ -17,7 +17,15 @@ import pytest
 
 from runtime.owner_scope import legacy_owner
 from runtime.tool_base import ToolContext
-from tools.kg.graph import KgAddRelation, KgNeighbors, KgQuery, KgUpsertEntity
+from tools.kg.graph import (
+    KgAddRelation,
+    KgAlias,
+    KgAssociate,
+    KgNeighbors,
+    KgQuery,
+    KgUpsertEntity,
+    delete_owner,
+)
 from tools.memory.store import (
     MemoryAppend,
     MemoryDelete,
@@ -140,6 +148,30 @@ def test_kg_same_name_entities_are_per_owner(tmp_path):
     assert na["edge_count"] == 1 and nb["edge_count"] == 0
     nall = _run(KgNeighbors(), {"name": "model-x", "all_owners": True}, bob)
     assert nall.result["edge_count"] == 1
+
+
+def test_kg_aliases_associations_and_delete_are_per_owner(tmp_path):
+    alice = _ctx(tmp_path, "alice")
+    bob = _ctx(tmp_path, "bob")
+    for ctx, gpu in ((alice, "gpu-a"), (bob, "gpu-b")):
+        _run(KgUpsertEntity(), {"name": "model-x"}, ctx)
+        _run(KgAlias(), {"alias": "mx", "target": "model-x"}, ctx)
+        _run(KgAssociate(), {"entities": ["mx", gpu]}, ctx)
+
+    assert _run(KgQuery(), {"name": "mx"}, alice).result["count"] == 1
+    assert _run(KgNeighbors(), {"name": "mx"}, alice).result["related"] == [
+        {"name": "gpu-a", "weight": 1.0}]
+    assert _run(KgNeighbors(), {"name": "mx"}, bob).result["related"] == [
+        {"name": "gpu-b", "weight": 1.0}]
+
+    db = str(tmp_path / "mem.db")
+    assert delete_owner(db, "alice") == 4  # entity, GPU stub, alias, association
+    assert _run(KgQuery(), {"name": "mx"}, alice).result["count"] == 0
+    assert _run(KgQuery(), {"name": "mx"}, bob).result["count"] == 1
+    conn = sqlite3.connect(db)
+    assert [r[0] for r in conn.execute("SELECT owner FROM kg_alias")] == ["bob"]
+    assert [r[0] for r in conn.execute("SELECT owner FROM kg_association")] == ["bob"]
+    conn.close()
 
 
 # ---- rag ------------------------------------------------------------------

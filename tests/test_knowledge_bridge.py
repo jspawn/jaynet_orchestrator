@@ -222,6 +222,43 @@ def test_rag_search_without_plugin_is_plain(tmp_path, ctx, _fake_embed):
     assert res.result["count"] >= 1
 
 
+def test_rag_min_score_filters_before_rerank(tmp_path, ctx, _fake_embed, monkeypatch):
+    c = _rag_ctx(ctx, tmp_path, tmp_path / "projects", owner="u")
+    default = run(rag_store.RagSearch().execute({"query": "widget"}, c))
+    assert default.result["count"] == 2       # default -1 preserves weak hits
+
+    seen = []
+    async def fake_rerank(query, docs, context):
+        seen.extend(docs)
+        return list(reversed(range(len(docs))))
+    monkeypatch.setattr(rag_store, "_rerank", fake_rerank)
+    gated = run(rag_store.RagSearch().execute(
+        {"query": "widget", "min_score": 0.5, "rerank": True}, c))
+    assert gated.result["count"] == 1
+    assert gated.result["below_threshold"] == 1
+    assert gated.result["matches"][0]["text"] == "class Widget renders"
+    assert seen == ["class Widget renders"]   # weak hit never reaches reranker
+
+
+def test_rag_min_score_requires_abstention(tmp_path, ctx, monkeypatch):
+    async def weak_embed(texts, context):
+        return [[0.8, 0.6] for _ in texts]
+    monkeypatch.setattr(rag_store, "_embed", weak_embed)
+    rerank_calls = []
+    async def fake_rerank(query, docs, context):
+        rerank_calls.append(docs)
+        return []
+    monkeypatch.setattr(rag_store, "_rerank", fake_rerank)
+    c = _rag_ctx(ctx, tmp_path, tmp_path / "projects", owner="u")
+
+    res = run(rag_store.RagSearch().execute(
+        {"query": "unknown", "min_score": 0.9, "rerank": True}, c))
+    assert res.status == "ok" and res.result["count"] == 0
+    assert res.result["below_threshold"] == 2
+    assert "do not infer an answer" in res.result["note"]
+    assert rerank_calls == []
+
+
 def test_rag_excerpt_graph_cache(tmp_path, ctx, _fake_embed, monkeypatch):
     """The excerpt hook fires on the request path: graph.json is parsed once
     and cached by (mtime, size) — the file is swapped atomically on rebuild,

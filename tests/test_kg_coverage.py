@@ -8,7 +8,15 @@ import asyncio
 import pytest
 
 from runtime.tool_base import ToolContext
-from tools.kg.graph import KgAddRelation, KgNeighbors, KgQuery, KgRemoveRelation, KgUpsertEntity
+from tools.kg.graph import (
+    KgAddRelation,
+    KgAlias,
+    KgAssociate,
+    KgNeighbors,
+    KgQuery,
+    KgRemoveRelation,
+    KgUpsertEntity,
+)
 
 
 @pytest.fixture
@@ -99,3 +107,68 @@ def test_remove_relation(ctx):
     # removing a non-existent edge is an explicit error
     r = _run(KgRemoveRelation(), {"src": "A", "rel": "likes", "dst": "B"}, ctx)
     assert r.status == "error" and "no such relation" in r.error
+
+
+def test_alias_resolves_reads_writes_and_relation_removal(ctx):
+    _run(KgUpsertEntity(), {"name": "Qwen3", "type": "model"}, ctx)
+    tool = KgAlias()
+    assert tool.needs_confirmation({"merge": False}, ctx) is False
+    assert tool.needs_confirmation({"merge": True}, ctx) is True
+    assert _run(tool, {"alias": "qwen", "target": "Qwen3"}, ctx).status == "ok"
+
+    _run(KgUpsertEntity(), {"name": "qwen", "attrs": {"params": "35B"}}, ctx)
+    edge = _run(KgAddRelation(), {"src": "qwen", "rel": "runs_on", "dst": "R9700"}, ctx)
+    assert edge.result["edge"] == "Qwen3 -[runs_on]-> R9700"
+    query = _run(KgQuery(), {"name": "qwen"}, ctx).result
+    assert query["count"] == 1
+    assert query["entities"][0]["name"] == "Qwen3"
+    assert query["entities"][0]["aliases"] == ["qwen"]
+    assert query["entities"][0]["attrs"] == {"params": "35B"}
+    neighbors = _run(KgNeighbors(), {"name": "qwen"}, ctx).result
+    assert neighbors["root"] == "Qwen3" and neighbors["edge_count"] == 1
+    removed = _run(KgRemoveRelation(), {"src": "qwen", "rel": "runs_on",
+                                       "dst": "R9700"}, ctx)
+    assert removed.status == "ok"
+
+
+def test_alias_merge_deduplicates_edges_and_rejects_cycles(ctx):
+    _run(KgUpsertEntity(), {"name": "canonical", "type": "model",
+                            "attrs": {"shared": "canonical"}}, ctx)
+    _run(KgUpsertEntity(), {"name": "alternate", "type": "ignored",
+                            "attrs": {"shared": "alias", "extra": 1}}, ctx)
+    for src, dst, note in (("canonical", "C", "canonical"),
+                           ("alternate", "C", "alias"),
+                           ("alternate", "D", "alias"),
+                           ("canonical", "alternate", "link")):
+        _run(KgAddRelation(), {"src": src, "rel": "links", "dst": dst,
+                               "attrs": {"note": note}}, ctx)
+
+    tool = KgAlias()
+    refused = _run(tool, {"alias": "alternate", "target": "canonical"}, ctx)
+    assert refused.status == "error" and "merge=true" in refused.error
+    merged = _run(tool, {"alias": "alternate", "target": "canonical",
+                         "merge": True}, ctx)
+    assert merged.status == "ok" and merged.result["relations_merged"] == 3
+    query = _run(KgQuery(), {"name": "alternate"}, ctx).result
+    assert query["count"] == 1
+    assert query["entities"][0]["attrs"] == {"shared": "canonical", "extra": 1}
+    assert query["entities"][0]["type"] == "model"
+    neighbors = _run(KgNeighbors(), {"name": "canonical"}, ctx).result
+    assert neighbors["edge_count"] == 2       # duplicate and self-link removed
+
+    assert _run(tool, {"alias": "a", "target": "b"}, ctx).status == "ok"
+    cycle = _run(tool, {"alias": "b", "target": "a"}, ctx)
+    assert cycle.status == "error" and "cycle" in cycle.error
+
+
+def test_associations_strengthen_and_return_related_context(ctx):
+    _run(KgAlias(), {"alias": "qwen", "target": "Qwen3"}, ctx)
+    tool = KgAssociate()
+    first = _run(tool, {"entities": ["qwen", "R9700", "RAG"]}, ctx)
+    assert first.status == "ok" and len(first.result["associations"]) == 3
+    _run(tool, {"entities": ["Qwen3", "R9700"]}, ctx)
+    related = _run(KgNeighbors(), {"name": "qwen"}, ctx).result["related"]
+    assert related == [{"name": "R9700", "weight": 2.0},
+                       {"name": "RAG", "weight": 1.0}]
+    duplicate = _run(tool, {"entities": ["qwen", "Qwen3"]}, ctx)
+    assert duplicate.status == "error"
