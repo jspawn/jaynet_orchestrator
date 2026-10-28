@@ -300,7 +300,7 @@ def render(config: dict) -> str:
         if slot == "specialist" and not p and brain \
                 and "specialist" in slots and not slots["specialist"]:
             # specialist disabled: keep the alias alive by pointing it at the
-            # brain target (same behavior as the down-server fallback)
+            # brain target (explicit empty-slot degradation only)
             p = brain
         # remote presets are served off-box (llama-server, vLLM, Ollama, …) —
         # point the alias at that endpoint instead of the local launcher
@@ -362,7 +362,10 @@ def render(config: dict) -> str:
         model_list.append({"model_name": r["litellm_alias"],
                            "litellm_params": params})
 
-    fallbacks = [{"local-specialist": ["local-orchestrator"]}]
+    # No local-specialist→brain fallback: silently changing the delegated
+    # model corrupts evals and hides specialist failures. An explicitly empty
+    # specialist slot still maps to the brain above.
+    fallbacks = []
     for r in enabled:
         fb = [f for f in r["fallbacks"] if f in valid
               and f != r["litellm_alias"]]

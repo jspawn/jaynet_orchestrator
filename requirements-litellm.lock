@@ -19,7 +19,7 @@ click==8.5.0
 croniter==6.2.4
 cryptography==50.0.1
 distro==1.9.0
-dnspython==2.8.0
+dnspython==2.9.0
 email-validator==2.3.0
 expression==5.7.0
 fastapi==0.141.1
@@ -46,7 +46,7 @@ jiter==0.17.0
 jmespath==1.1.0
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
-litellm==1.102.1
+litellm==1.102.2
 litellm-enterprise==0.1.67
 litellm-proxy-extras==0.4.97
 markdown-it-py==4.2.0
