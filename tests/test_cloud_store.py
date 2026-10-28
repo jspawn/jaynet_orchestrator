@@ -134,11 +134,11 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     # enabled cloud row rendered; disabled excluded
     assert by_name["nova-1"]["api_key"] == "os.environ/NOVA_API_KEY"
     assert "off-1" not in by_name
-    # fallbacks: filtered to existing aliases; specialist errors never reroute
+    # fallbacks: filtered to existing aliases, local-specialist always covered
     fb = {k: v for entry in doc["router_settings"]["fallbacks"]
           for k, v in entry.items()}
     assert fb["nova-1"] == ["local-orchestrator"]   # qwen-plus not in catalog
-    assert "local-specialist" not in fb
+    assert fb["local-specialist"] == ["local-orchestrator"]
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
 
 

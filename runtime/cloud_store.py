@@ -362,10 +362,7 @@ def render(config: dict) -> str:
         model_list.append({"model_name": r["litellm_alias"],
                            "litellm_params": params})
 
-    # No local-specialist→brain fallback: silently changing the delegated
-    # model corrupts evals and hides specialist failures. An explicitly empty
-    # specialist slot still maps to the brain above.
-    fallbacks = []
+    fallbacks = [{"local-specialist": ["local-orchestrator"]}]
     for r in enabled:
         fb = [f for f in r["fallbacks"] if f in valid
               and f != r["litellm_alias"]]

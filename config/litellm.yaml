@@ -130,8 +130,8 @@ router_settings:
     - glm-5.2:       ["qwen-plus", "local-orchestrator"]
     - gemini-pro:    ["qwen-plus", "local-orchestrator"]
     - qwen-plus:     ["local-orchestrator"]
-    # No specialist→brain fallback: delegation/benchmarks must not silently
-    # change models when the specialist errors.
+    # If the local specialist is down, degrade to the brain.
+    - local-specialist:   ["local-orchestrator"]
 
 litellm_settings:
   # Response cache for CLOUD aliases only — local aliases opt out per-model
