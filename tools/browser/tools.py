@@ -117,7 +117,7 @@ class BrowserScreenshot(Tool):
         "Capture a PNG screenshot of a web page after JavaScript renders, and "
         "deliver it to the user as a downloadable / previewable image. Use for "
         "visual snapshots — layouts, charts, dashboards, proof of a page's state. "
-        "For page TEXT, use web.render instead. Set return_image=true to also "
+        "For page TEXT, use web.fetch (js=true for JS-heavy pages) instead. Set return_image=true to also "
         "see the image yourself (visual verification of a page you built or "
         "changed; needs a vision brain and a sane pixel size)."
     )
@@ -178,7 +178,7 @@ class BrowserPdf(Tool):
     description = (
         "Render a web page to a PDF after JavaScript runs, and deliver it to the "
         "user as a downloadable / previewable file. Good for archiving an article "
-        "or report as it appears in the browser. For page TEXT, use web.render."
+        "or report as it appears in the browser. For page TEXT, use web.fetch (js=true for JS-heavy pages)."
     )
     parameters = {
         "type": "object",

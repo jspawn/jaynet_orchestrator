@@ -229,10 +229,12 @@ class CodeRun(Tool):
         "ORCH_SUBCALL_SOCK is set, llm_query(prompt, ...) and "
         "llm_query_batched(prompts, ...) are pre-defined: mediated sub-LLM "
         "calls billed to this run — map LLM work over SLICES of a large file "
-        "instead of reading it whole into your context. For long/detached/"
-        "GPU jobs use job.start instead. Never import subprocess/os.system "
-        "to dodge the sandbox. A declined call is final — verify with fs.* "
-        "reads instead of retrying."
+        "instead of reading it whole into your context. Backgrounded "
+        "processes (nohup, trailing &, disown, screen, tmux) are TERMINATED "
+        "when this call returns; for persistent servers or long/detached/GPU "
+        "jobs use job.start or serve.* instead. Never import subprocess/"
+        "os.system to dodge the sandbox. A declined call is final — verify "
+        "with fs.* reads instead of retrying."
     )
     private = True
     parameters = {

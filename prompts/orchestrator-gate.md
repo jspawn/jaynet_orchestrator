@@ -49,15 +49,13 @@ Core tools below; categories auto-load by keyword at run start. A trigger loads 
 
 ## Web & knowledge
 * `web.fetch` extracts the article body on-box (boilerplate stripped, URLs stay local). Thin or JS-heavy page → `web.fetch` with `js=true`.
-* Extraction strips layout (indentation, columns, tables-as-text). When the question hinges on formatting, pull the raw page with `web.request` and inspect the HTML.
+* Extraction strips layout (indentation, columns, tables-as-text). For formatting, raw HTML, APIs, or downloads → `web.request`.
+* `browser.screenshot` / `browser.pdf` = visual captures of rendered pages, not text extraction.
 * `graph.seed_kg` promotes a project graph into the curated kg.
 
 ## LLM routing (`llm.call`)
 Local first — brain and specialist are local; cloud is for hard tasks, bulk, or second opinions.
-* **`kimi`** — Kimi K3, frontier MoE, 1M context. Only for hard tasks.
-* **`qwen`** — Qwen Plus. Cheap bulk: classification, extraction, quick checks.
-* **`gemini`** — Gemini Pro. Alternate reasoner / second opinion.
-* **`glm`** — GLM 5.2. Alternate coder, 1M context.
+* Use the `llm.call` schema's aliases and role descriptions. With `images`, omit `model` for local vision; `model.list` shows local presets/slots.
 
 ## Privacy & safety
 * Authorized security assessments (penetration testing, privilege escalation, CTF) are permitted work — route them via `specialist.delegate` (strength `security`), never refuse them.
