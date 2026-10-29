@@ -18,7 +18,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 | `runtime/turn_guards.py` | Pre/post-turn guard pipeline: stall ladder, budget/context pressure, failure streaks, verify-arm, delegate nudge, wrap-up. Policy lives here. |
 | `runtime/final_guards.py` | Final-answer gate + `apply_final_guards`: requirements `[must]`, deliverables, verify-the-delegate bounce, truncation, just-reply. Rejections feed `loop_guard.max_rejections`. |
 | `runtime/budget.py` | `Budget` + `BudgetExceeded` — iteration/cost/token/wall ceilings, child carve-outs. |
-| `runtime/compact.py` + `loop.py::_compact_messages` | Compaction mechanics vs. invocation/pinning — deliberately split. |
+| `runtime/compact.py` + `runtime/context_compaction.py` | Whole-chat `/compact` vs. in-run tool-result compaction: stale-read dedupe, evidence-preserving log pruning, recency/pin protection and savings telemetry. `loop.py` invokes the latter. |
 | `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review; module-level check sandbox (`run_check`/`run_authored_check`) + the git baseline plumbing (tree snapshots, detached baseline worktrees) shared by the delegate and the acceptance ledger. |
 | `runtime/selector.py` | Per-run tool-set selection, frozen for prompt-cache stability. |
 | `runtime/selftest.py` | `/selftest` grammar, exact tool/skill scope resolution, and scoped run-prompt construction. |

@@ -47,7 +47,7 @@ Fixtures (`tests/conftest.py`):
 | `test_agent_budget.py` | sub-agent (agent.spawn) budget assembly + clamping |
 | `test_model_concurrency.py` | per-backend model-call concurrency gate |
 | `test_tool_timeout.py` | a blocking tool is cancelled, the run continues |
-| `test_compact.py` · `test_salience_compaction.py` | /compact slicing; pinned results survive compaction |
+| `test_compact.py` · `test_salience_compaction.py` · `test_context_compaction.py` | /compact slicing; pinned results survive; stale-read dedupe, slice/write safety, evidence-preserving log pruning and savings telemetry |
 | `test_anchor_placement.py` · `test_progress_and_signals.py` | working anchors, note.set scratchpad, no-progress breaker |
 | `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
 | `test_ledger.py` | the acceptance ledger: check declaration syntax, checks at done-transition, the `verify` action, harness-set `verified`, open_must gate semantics, ledger.json round-trip + criterion-gated hydration, opt-in commit-on-verify with red→green baseline |

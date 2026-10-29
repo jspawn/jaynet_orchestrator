@@ -84,8 +84,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Tool Selection** — which tools the model sees: `auto` = core set +
   keyword-triggered namespaces, with `tools.load` as the mid-run escape
   hatch. The `keyword_namespaces.*` entries are the trigger word lists.
-- **Compaction** — shrinking old tool results in the transcript to stubs:
-  size threshold, how many recent results to keep, pass frequency.
+- **Compaction** — superseded file-read deduplication and old-result stubs;
+  execution logs keep their command, exit code, head and error tail. Controls:
+  read dedupe, size threshold, recent/pinned-result protection, pass frequency.
+  Events report exact saved characters and estimated saved tokens.
 - **Parallel Tools** — run independent approved tool calls of one turn
   concurrently.
 - **Privacy & Confirmation** — the taint model (private results never reach

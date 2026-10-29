@@ -42,6 +42,7 @@ from runtime.env import env
 
 from . import cloud_gate, protocol
 from .budget import BudgetExceeded
+from .context_compaction import compact_messages as _compact_messages_detailed
 from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
     _DEFAULT_STRENGTH_KEYWORDS,
     DISPATCH_GATES,
@@ -228,67 +229,8 @@ def _terminal_job_poll(name: str, result) -> bool:
 
 
 def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None) -> int:
-    """Shrink old, large tool-result messages in place to keep the re-sent
-    transcript from ballooning every turn (the loop resends the whole list).
-
-    A tool result, once a later model turn has consumed it, rarely needs to sit
-    verbatim in context for the rest of the run — but it costs full tokens on
-    every subsequent turn. We replace the body of large, older tool messages with
-    a short stub that keeps the status + a head snippet and points at trace.query
-    for the full text. Two kinds of message are protected from stubbing: the most
-    recent `keep_last` tool messages (recency — the model is likely still working
-    with them) AND any the agent has pinned via context.pin (salience — retention
-    shouldn't be purely positional, or a rare-but-crucial early result gets stubbed
-    while recent noise survives). Nothing else (system / user / assistant) is
-    touched. We only mutate `content`, never the list length, so message indices
-    (and the taint/pin sets keyed on them) stay valid. Idempotent.
-
-    Returns the number of messages compacted (for telemetry). No-op unless
-    cfg['enabled'] is true.
-    """
-    if not cfg or not cfg.get("enabled"):
-        return 0
-    max_chars = int(cfg.get("max_result_chars", 2000))
-    keep_last = int(cfg.get("keep_last", 3))
-    # Indices of tool messages, oldest→newest; protect the last `keep_last`
-    # (recency) plus anything pinned (salience).
-    tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    protect = set(tool_idx[-keep_last:]) if keep_last else set()
-    if pinned:
-        protect |= {i for i in pinned if 0 <= i < len(messages)}
-    compacted = 0
-    for i in tool_idx:
-        if i in protect:
-            continue
-        m = messages[i]
-        content = m.get("content") or ""
-        if len(content) <= max_chars or '"__compacted__"' in content:
-            continue
-        head = content[:300].replace("\n", " ")
-        # Preserve the ok/error signal so the model still reads the gist.
-        status = "error" if '"status": "error"' in content[:60] else "ok"
-        m["content"] = json.dumps({
-            "status": status, "__compacted__": True, "head": head,
-            "note": ("full result elided to save context; retrieve with "
-                     "trace.query view=events run_id=<this run> if needed"),
-        })
-        compacted += 1
-    # Image hygiene: image_url blocks (tool return_image payloads, user
-    # attachments) cost image tokens on every re-sent turn. Keep only the most
-    # recent image-bearing message intact; older blocks become a text marker.
-    img_idx = [i for i, m in enumerate(messages)
-               if isinstance(m.get("content"), list)
-               and any(isinstance(b, dict) and b.get("type") == "image_url"
-                       for b in m["content"])]
-    for i in img_idx[:-1]:
-        m = messages[i]
-        m["content"] = [
-            {"type": "text",
-             "text": "[image elided to save context — re-capture if needed]"}
-            if isinstance(b, dict) and b.get("type") == "image_url" else b
-            for b in m["content"]]
-        compacted += 1
-    return compacted
+    """Compatibility wrapper returning only the compacted-message count."""
+    return _compact_messages_detailed(messages, cfg, pinned)["compacted"]
 
 
 def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
@@ -1845,10 +1787,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         amortizes several stubs instead of one per turn."""
         if st.compaction_every > 1 and rs.budget.iterations % st.compaction_every:
             return
-        _n_comp = _compact_messages(rs.messages, st.compaction, rs.pinned)
-        if _n_comp:
-            await emit("compaction", rs.budget.iterations,
-                       {"compacted": _n_comp})
+        stats = _compact_messages_detailed(rs.messages, st.compaction, rs.pinned)
+        if stats["compacted"]:
+            await emit("compaction", rs.budget.iterations, stats)
 
     async def _turn_anchor(self, rs, st, *, work_root, goal_text):
         """Assemble this turn's volatile prompt tail (never stored in
@@ -2946,10 +2887,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         """One emergency compact + no-tools answer after a context-window 400.
         Recent large results lose their usual recency protection; pins stay."""
         cfg = {**st.compaction, "enabled": True, "keep_last": 0}
-        compacted = _compact_messages(rs.messages, cfg, rs.pinned)
-        if compacted:
+        stats = _compact_messages_detailed(rs.messages, cfg, rs.pinned)
+        if stats["compacted"]:
             await emit("compaction", rs.budget.iterations,
-                       {"compacted": compacted, "emergency": True})
+                       {**stats, "emergency": True})
         answer = await self._final_synthesis(
             rs, model=model, sampling=sampling, think=think, reason="context")
         if answer:

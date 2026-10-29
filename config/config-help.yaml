@@ -155,8 +155,9 @@ exact:
   models.min_free_ram_gib: "RAM floor (GiB) for the fit-aware scheduler's CPU-preset check — a CPU preset with a current measured.ram_gib only conflicts with CPU co-tenants when MemAvailable drops below ram_gib + this floor."
 
   # --- compaction & parallel tools ---
-  compaction.enabled: "Shrink old/large tool results in the transcript to short stubs."
-  compaction.max_result_chars: "Only tool results larger than this get stubbed."
+  compaction.enabled: "Shrink old tool results; preserve recent/pinned results and trace recovery."
+  compaction.dedupe_reads: "Remove superseded fs.read slices after a newer identical read or later fs.write/edit."
+  compaction.max_result_chars: "Stub other old results above this size; execution logs keep command, exit code, head and error tail."
   compaction.keep_last: "Never compact the N most recent tool results."
   compaction.every: "Run the compaction pass every Nth iteration (amortizes prompt-cache breaks)."
   parallel_tools.enabled: "Execute approved independent tool calls of one turn concurrently."

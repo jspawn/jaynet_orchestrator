@@ -319,9 +319,11 @@ children serialize on one GPU, and N samples cost N completions.
 ### 3.8 Compaction: when the window fills
 
 Contexts fill, and two mechanisms answer that at two scales. *Inside a
-run*, oversized tool results get stubbed — the loop replaces old bulk with
-a placeholder plus a path, because the model rarely needs the full bytes
-twice. *Across a chat*, `/compact` summarizes the older history into a
+run*, superseded reads of the same file slice become re-read pointers, while
+old oversized results get stubbed. Execution logs retain their command, exit
+code, head and error tail; recent and explicitly pinned results stay verbatim,
+and the full evidence remains available through `trace.query`. *Across a chat*,
+`/compact` summarizes the older history into a
 continuity brief written as working notes to the assistant's future self —
 goal, constraints, decisions with reasons, concrete state — and keeps the
 last exchanges verbatim so the conversational flow survives. The theory is

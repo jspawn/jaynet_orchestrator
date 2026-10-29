@@ -175,7 +175,10 @@ EVENTS: dict[str, EventSpec] = {
         doc="skill badge ceremony marker (j-space gate)"),
     "compaction": EventSpec(
         required={"compacted": (int,)},
-        doc="in-place transcript compaction stubbed N messages"),
+        optional={"deduplicated": (int,), "log_pruned": (int,),
+                  "saved_chars": (int,), "estimated_saved_tokens": (int,),
+                  "emergency": (bool,)},
+        doc="transcript compaction count, strategies and estimated savings"),
     # ---- routing / setup ----
     "route_decision": EventSpec(
         free_form=True,

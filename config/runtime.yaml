@@ -613,12 +613,11 @@ chains:
 #   all    - expose every tool every turn (default; zero behaviour change)
 #   static - expose only the caller's --tools allowlist (else all)
 #   auto   - core_namespaces + any namespace whose keyword appears in the message
-# Transcript compaction. The loop re-sends the WHOLE conversation each turn, so a
-# big tool result (a file read, a long diff) keeps costing full tokens for the rest
-# of the run. When enabled, old + large tool-result messages are shrunk in place to
-# a short stub (status + head snippet + a pointer to trace.query) once they're past
-# the most recent `keep_last`. System/user/assistant messages are never touched.
-# Enabled below, batched to every 3rd iteration so prompt-cache breaks amortize.
+# Transcript compaction. The loop re-sends the WHOLE conversation each turn, so old
+# tool results keep costing tokens. Past `keep_last`, superseded file reads become
+# re-read pointers; large logs keep their head/error tail and other large results a
+# head snippet. Full evidence stays in trace.query. System/user/assistant messages
+# are never touched. Batched every 3rd iteration to amortize prompt-cache breaks.
 models:
   # SQLite preset catalog: the admin Models → Presets subtab edits the DB, not this file.
   # The presets: below are the FACTORY SEED — imported into the DB on first
@@ -765,7 +764,10 @@ architect:
 
 compaction:
   enabled: true
-  max_result_chars: 2000     # only tool results larger than this are stubbed
+  dedupe_reads: true         # remove superseded fs.read results, even small ones;
+                             # identical slices only, and a later fs.write/edit invalidates them
+  max_result_chars: 2000     # other old tool results are stubbed above this size;
+                             # execution logs keep command, exit code, head and error tail
   keep_last: 3               # never compact the N most recent tool results
                              # (salience: results the agent context.pin's are also kept)
   every: 3                   # run the pass every Nth loop iteration, not every
