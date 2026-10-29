@@ -38,6 +38,22 @@ _LINTERS = {
     "shellcheck": {"check": ["shellcheck", "{path}"], "fix": None},
 }
 
+# Automatic selection is file-type aware; explicit linters= and operator-added
+# registry entries remain overrides. Directories keep the legacy behavior.
+_AUTO_SUFFIXES = {
+    "ruff": {".py", ".pyi"}, "ruff-format": {".py", ".pyi"},
+    "mypy": {".py", ".pyi"}, "pyflakes": {".py", ".pyi"},
+    "black": {".py", ".pyi"},
+    "eslint": {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"},
+    "tsc": {".ts", ".tsx", ".mts", ".cts"},
+    "shellcheck": {".sh", ".bash", ".ksh"},
+}
+
+
+def _auto_applies(name: str, path: Path) -> bool:
+    suffixes = _AUTO_SUFFIXES.get(name)
+    return path.is_dir() or suffixes is None or path.suffix.lower() in suffixes
+
 
 def _cfg(ctx: ToolContext) -> dict:
     return ctx.config.get("tools", {}).get("lint", {}) or {}
@@ -108,7 +124,8 @@ class LintRun(Tool):
         max_lines = int(args.get("max_output_lines", 120))
 
         requested = args.get("linters")
-        names = list(requested) if requested else list(registry.keys())
+        names = (list(requested) if requested else
+                 [name for name in registry if _auto_applies(name, path)])
 
         cwd = path if path.is_dir() else path.parent
         results = []

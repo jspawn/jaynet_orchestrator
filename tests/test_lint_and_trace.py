@@ -29,6 +29,24 @@ def test_lint_runs_installed_tool(project, ctx, monkeypatch):
     assert "ruff" in r.result["ran"]
 
 
+def test_lint_auto_selection_is_file_type_aware(project, ctx, monkeypatch):
+    source = project / "valid.py"
+    source.write_text("def answer():\n    return 42\n")
+    monkeypatch.setattr("tools.lint.run.shutil.which", lambda *_a, **_k: "/usr/bin/fake")
+    calls = []
+
+    async def fake_run(argv, cwd, timeout):
+        calls.append(argv)
+        return 0, "All checks passed", ""
+    monkeypatch.setattr("tools.lint.run._run", fake_run)
+    r = run(LintRun().execute({"path": str(source)}, ctx()))
+    assert r.status == "ok" and r.result["passed"] is True
+    assert "ruff" in r.result["ran"] and "shellcheck" not in r.result["ran"]
+
+    r = run(LintRun().execute({"path": str(source), "linters": ["shellcheck"]}, ctx()))
+    assert r.status == "ok" and r.result["ran"] == ["shellcheck"]
+
+
 def _seed_trace(tmp_path):
     db = tmp_path / "trace.db"
     conn = sqlite3.connect(str(db))
