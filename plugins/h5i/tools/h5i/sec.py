@@ -1,11 +1,11 @@
-"""browser.recon + browser.websec — the h5i red-team plugins (0.4.x), wired
+"""browser.recon + browser.websec — the h5i red-team plugins (0.5.x), wired
 as JayNet tools.
 
 recon is the endpoint ledger (what the target exposes and HOW h5i knows —
 candidate vs confirmed); websec is the HTTP workbench over the captured
 traffic (read/mutate/replay/diff, multi-send orchestration, findings with
-message-id evidence). Both operate on the sessions browser.browse opens
-(open capture=true records the traffic they read) and both inherit the
+message-id evidence). Both operate on sessions browser.browse opens
+(capture is on by default in h5i 0.5) and both inherit the
 session's policy — allowlist, rate, budget — from h5i itself. browser.test
 (h5i-test) is the third plugin: it replays portable attack flows against a
 target and checks them with repository-owned oracles — the one tool here
@@ -31,6 +31,7 @@ errors, not crashes. _run_h5i is the subprocess seam — tests monkeypatch it.
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from abc import abstractmethod
@@ -56,11 +57,17 @@ def _pcfg(ctx: ToolContext) -> dict:
     return ((ctx.config or {}).get("plugins") or {}).get("h5i") or {}
 
 
+def _user_local_bin() -> str | None:
+    """The no-sudo h5i 0.5 install location, absent from many service PATHs."""
+    local = Path.home() / ".local" / "bin" / "h5i"
+    return str(local) if local.is_file() and os.access(local, os.X_OK) else None
+
+
 def _binary(ctx: ToolContext) -> str | None:
     p = str(_pcfg(ctx).get("binary") or "").strip()
     if p:
         return p
-    return shutil.which("h5i")
+    return shutil.which("h5i") or _user_local_bin()
 
 
 async def _run_h5i(binary: str, args: list[str], timeout_s: int) -> tuple[str | None, str | None]:
@@ -212,7 +219,7 @@ class BrowserRecon(_H5iPluginTool):
         "endpoint's sources and evidence. export: the inventory, one "
         "endpoint per line. AUTHORIZED TARGETS ONLY. Never report a "
         "'candidate' endpoint as existing — only 'confirmed' means that. "
-        "The session comes from browser.browse open (use capture=true)."
+        "The session comes from browser.browse open (use its default capture)."
     )
     parameters = {
         "type": "object",
@@ -589,7 +596,7 @@ class BrowserWebsec(_H5iPluginTool):
         "human for approval first. Base claims on "
         "repeatable differences and cite the ids; no complete PoC = record "
         "as info at most. Needs a browser.browse session opened with "
-        "capture=true."
+        "its default capture."
     )
     parameters = {
         "type": "object",

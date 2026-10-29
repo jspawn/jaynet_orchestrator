@@ -1,24 +1,26 @@
 # h5i — the red-team browser for agents
 
 Adds **browser.browse**: a full browsing session the agent drives through the
-[h5i](https://github.com/h5i-dev/h5i) CLI — pure Rust, no Chromium/V8, ~3×
-faster and ~86% less memory than a Chromium lane, with domain allowlists and
-an auditable request record built in.
+[h5i](https://github.com/h5i-dev/h5i) CLI, with domain allowlists and an
+auditable request record built in. h5i 0.5 drives Chromium through
+`agent-browser`; every opened session captures its traffic by default.
 
-Since h5i 0.4 it is more than a browser: the engine is the HTTP client, so
-the page the agent drove and the traffic it produced are one session — and
-the optional **recon**/**websec** plugins turn that into an authorized
-security-testing workbench (endpoint ledger, replay/mutate/diff, findings
-with message-id evidence).
+The engine is also the HTTP client, so the page the agent drove and the
+traffic it produced are one session — and the optional **recon**/**websec**
+plugins turn that into an authorized security-testing workbench (endpoint
+ledger, replay/mutate/diff, findings with message-id evidence).
 
 ## Install
 
 ```bash
 curl -fsSL https://h5i.dev/install.sh | sh
+npm install -g agent-browser
+agent-browser install
 h5i --version   # then enable the plugin below
 ```
 
-No sudo: h5i 0.5+ installs into `~/.local/bin` (override with
+The `agent-browser` commands are the h5i 0.5 browser runtime dependency;
+recon/websec/test alone do not need them. No sudo: h5i 0.5+ installs into `~/.local/bin` (override with
 `H5I_INSTALL_DIR`). JayNet finds the binary there even when the systemd
 service PATH doesn't carry it — and the shipped env template now puts
 `${HOME}/.local/bin` first on the service PATH. If you have an old
@@ -95,9 +97,9 @@ Policy rails (audit 2026-10-06 #11):
 
 One tool, `browser.browse(action, ...)`:
 
-- `open url=...` — start (or reuse) a session on a page; `capture: true`
-  records every request the session makes; optional `allow` extra domains
-  and `new: true` for a fresh session
+- `open url=...` — start (or reuse) a session on a page; h5i 0.5 records its
+  traffic by default; optional `allow` extra domains and `new: true` for a
+  fresh session
 - `read url=...` — one-shot page read, no session kept
 - `snapshot` — page outline with `@e3`-style element refs (`delta: true` =
   only what changed)

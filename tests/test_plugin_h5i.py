@@ -152,8 +152,9 @@ def test_snapshot_delta_and_read(monkeypatch):
     _exe({"action": "snapshot", "delta": True})
     assert "--delta" in fake.calls[0][1]
     _exe({"action": "read", "url": "https://example.com"})
-    argv = fake.calls[1][1]
-    assert argv == ["browser", "read", "--", "https://example.com"]  # no session
+    assert fake.calls[1][1] == ["browser", "snapshot", "--session",
+                                "jaynet-req-abcd", "--url", "https://example.com"]
+    assert fake.calls[2][1] == ["browser", "close", "--session", "jaynet-req-abcd"]
 
 
 def test_interaction_actions(monkeypatch):
@@ -230,13 +231,13 @@ def test_run_h5i_caps_output(tmp_path):
     assert "output capped" in out
 
 
-# ---- h5i 0.4.x actions (red-team browser) -----------------------------------
+# ---- h5i 0.5 actions (red-team browser) -------------------------------------
 
-def test_open_capture_flag(monkeypatch):
+def test_open_capture_is_inherent_in_h5i_0_5(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     r = _exe({"action": "open", "url": "https://docs.rs/x", "capture": True})
     assert r.status == "ok"
-    assert "--capture" in fake.calls[0][1]
+    assert "--capture" not in fake.calls[0][1]
 
 
 def test_submit_scroll_waitfor(monkeypatch):

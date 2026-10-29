@@ -1,9 +1,9 @@
-# h5i plugin — the h5i red-team browser for agents (pure Rust, no
-# Chromium/V8). One tool, browser.browse, covers the whole session flow:
-# open (capture=true records all traffic) → snapshot (@refs) →
-# click/type/submit/scroll/waitfor → extract/structured/transcript/markdown
-# → screenshot → requests/audit → close. h5i 0.4.x doubles as an
-# authorized-security-testing browser: the recon/websec/test plugins
+# h5i plugin — browser sessions and captured traffic for agents. One tool,
+# browser.browse, covers the whole flow: open (h5i 0.5 captures by default) →
+# snapshot (@refs) → click/type/submit/scroll/waitfor →
+# extract/structured/transcript/markdown → screenshot → requests/audit →
+# close. h5i 0.5 doubles as an authorized-security-testing browser: the
+# recon/websec/test plugins
 # (separate binaries, `h5i plugin install --from <path>`) add the endpoint
 # ledger, replay/mutate/diff/findings, multi-send orchestration (experiment/
 # matrix/sequence/socket/dom/grpc) and oracle-checked attack-flow replay on
@@ -13,8 +13,8 @@
 name: h5i
 version: 0.3.0
 description: >-
-  The h5i red-team browser (pure Rust, ~3x faster, ~86% less memory than
-  Chromium): browser.browse — open/snapshot/click/type/submit/scroll/
+  The h5i red-team browser (h5i 0.5 via agent-browser): browser.browse —
+  open/snapshot/click/type/submit/scroll/
   waitfor/extract/structured/transcript/markdown/screenshot with domain
   allowlists and an auditable traffic log (capture → requests/audit).
   Doubles as the authorized security-testing lane (h5i recon/websec/test

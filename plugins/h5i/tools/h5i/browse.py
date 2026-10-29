@@ -1,10 +1,10 @@
-"""browser.browse — the h5i red-team browser: drives pages AND captures the
-HTTP traffic behind them (pure Rust, no Chromium/V8).
+"""browser.browse — h5i browser sessions and their captured HTTP traffic.
 
 One tool covers the whole session flow (h5i sessions persist on disk between
-CLI calls, addressed by name):
+CLI calls, addressed by name). h5i 0.5 opens a capture proxy for every session;
+the legacy capture argument is accepted but needs no CLI flag.
 
-    open url=... [allow=[...]] [capture=true] [new=true]   start/reuse a session
+    open url=... [allow=[...]] [new=true]   start/reuse a session
     snapshot [delta=true]                     page outline with @refs
     click ref=@e3 / type ref=@e5 text=...     interact
     submit [ref] / scroll by=-2               forms + navigation
@@ -15,7 +15,7 @@ CLI calls, addressed by name):
     transcript                                media captions, fetched + parsed
     markdown                                  readable page text
     screenshot                                PNG of the session's page
-    read url=...                              one-shot, no session
+    read url=...                              one-shot snapshot + close
     requests / audit                          the captured traffic / the full
                                               evidence timeline
     status / close                            session lifecycle
@@ -25,7 +25,7 @@ web.fetch for plain reads; web.fetch js=true or browser.browse for JS pages;
 browser.browse when interaction, traffic capture or an audit trail matters;
 browser.pdf (Chromium) for PDFs — h5i has no PDF pipeline.
 
-Red-team note: h5i 0.4.x doubles as an authorized-security-testing browser
+Red-team note: h5i 0.5 doubles as an authorized-security-testing browser
 (the recon/websec plugins: endpoint ledger, replay/mutate/diff, findings with
 message-id evidence). Those plugins are separate binaries
 (`h5i plugin install --from <path>`); browser.browse stays the driving lane.
@@ -128,9 +128,9 @@ class BrowserBrowse(Tool):
     # recon/websec tools private (audit 2026-10-06 #11 follow-up).
     private = True
     description = (
-        "The h5i browser (pure Rust, policy-controlled, auditable): drives "
-        "pages AND captures the HTTP traffic behind them. open a page "
-        "(capture=true records every request), snapshot its outline with "
+        "The h5i browser (policy-controlled, auditable): drives pages AND "
+        "captures their HTTP traffic (default on h5i 0.5). open a page, "
+        "snapshot its outline with "
         "@refs, click/type/submit/scroll/waitfor to interact, extract "
         "structured CSS data, structured=the JSON-LD/OpenGraph/meta a page "
         "publishes about itself (property portals publish LISTINGS there — "
@@ -228,8 +228,7 @@ class BrowserBrowse(Tool):
                 argv += ["--allow", d]
             if args.get("new"):
                 argv.append("--new")
-            if args.get("capture"):
-                argv.append("--capture")
+            # h5i 0.5 opens a capture proxy inherently; --capture was removed.
             if identity:
                 argv += ["--identity", identity]
             # `--` before the model-supplied positional: a url/ref/spec
@@ -237,7 +236,8 @@ class BrowserBrowse(Tool):
             return argv + ["--", url]
         if a == "read":
             url = str(args.get("url") or "").strip()
-            return ["browser", "read", "--", url] if url else None
+            return (["browser", "snapshot", "--session", s, "--url", url]
+                    if url else None)
         if a == "snapshot":
             argv = ["browser", "snapshot", "--session", s]
             if args.get("delta"):
@@ -335,6 +335,10 @@ class BrowserBrowse(Tool):
         timeout = int(_pcfg(ctx).get("timeout_s") or 90)
         timeout = max(1, min(timeout, 300))
         out, err = await _run_h5i(binary, argv, timeout)
+        if action == "read":
+            # One-shot read: leave no live session behind, even after an error.
+            await _run_h5i(binary, ["browser", "close", "--session",
+                                    _session(args, ctx)], timeout)
         if err is not None:
             return ToolResult(status="error", tool_name=self.name,
                               result=None, error=err)

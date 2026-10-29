@@ -40,6 +40,20 @@ class _FakeH5i:
         monkeypatch.setattr(sec, "_run_h5i", fake)
 
 
+def test_user_local_binary_fallback(monkeypatch):
+    monkeypatch.setattr(sec.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(sec, "_user_local_bin", lambda: "/home/u/.local/bin/h5i")
+    seen = []
+
+    async def fake(binary, argv, timeout):
+        seen.append(binary)
+        return "OK", None
+    monkeypatch.setattr(sec, "_run_h5i", fake)
+    r = run(sec.BrowserRecon().execute({"action": "extract"},
+                                       _ctx(cfg={"plugins": {"h5i": {}}})))
+    assert r.status == "ok" and seen == ["/home/u/.local/bin/h5i"]
+
+
 def test_both_tools_private():
     """Captures carry Authorization/cookies — both red-team tools are
     private=True so their results never leave the box by default."""
