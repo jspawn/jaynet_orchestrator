@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import math
 import os
 import shutil
 import sys
@@ -186,9 +187,11 @@ def _parse_prom_metrics(text: str, prefixes: tuple[str, ...]) -> dict:
         if not any(k.startswith(p) for p in prefixes):
             continue
         try:
-            out[k] = float(v)
+            value = float(v)
         except ValueError:
             continue
+        if math.isfinite(value):
+            out[k] = value
     return out
 
 

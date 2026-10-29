@@ -216,11 +216,14 @@ def compact_messages(messages: list[dict], cfg: dict,
                        for b in m["content"])]
     for i in img_idx[:-1]:
         message = messages[i]
+        before = len(json.dumps(message["content"], ensure_ascii=False))
         message["content"] = [
             {"type": "text",
              "text": "[image elided to save context — re-capture if needed]"}
             if isinstance(b, dict) and b.get("type") == "image_url" else b
             for b in message["content"]]
+        after = len(json.dumps(message["content"], ensure_ascii=False))
         stats["compacted"] += 1
+        stats["saved_chars"] += before - after
     stats["estimated_saved_tokens"] = stats["saved_chars"] // 4
     return stats

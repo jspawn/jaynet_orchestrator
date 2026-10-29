@@ -140,3 +140,18 @@ def test_maybe_compact_emits_detailed_telemetry():
     assert kind == "compaction" and iteration == 1
     assert data["compacted"] == data["deduplicated"] == 1
     assert "saved_chars" in data and "estimated_saved_tokens" in data
+
+
+def test_image_elision_counts_serialized_character_savings():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "x" * 4000}}
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "first"}, image]},
+        {"role": "user", "content": [{"type": "text", "text": "latest"}, image]},
+    ]
+    before = len(json.dumps(messages[0]["content"], ensure_ascii=False))
+    stats = compact_messages(messages, CFG)
+    after = len(json.dumps(messages[0]["content"], ensure_ascii=False))
+    assert stats["compacted"] == 1
+    assert stats["saved_chars"] == before - after
+    assert stats["estimated_saved_tokens"] == stats["saved_chars"] // 4
+    assert messages[1]["content"][1] == image

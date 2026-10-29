@@ -591,6 +591,9 @@ def test_parse_prom_metrics_strips_labels_and_keeps_prefix():
         'radiance:decode_tokens_per_second{model_name="qwen35"} 112.19\n'
         'llamacpp:prompt_tokens_total 1\n'   # wrong prefix family — dropped
         'vllm:broken{model_name="x"} nan-ish\n'
+        'vllm:not_a_number NaN\n'
+        'vllm:infinite +Inf\n'
+        'radiance:decode_tokens_per_second -Inf\n'
     )
     m = _parse_prom_metrics(text, ("vllm:", "radiance:"))
     assert m == {
