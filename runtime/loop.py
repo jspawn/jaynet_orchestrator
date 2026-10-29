@@ -256,7 +256,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                     share_private: bool | None = None, verify=None,
                     todos_sync: bool = False,
                     work_root_path: str | None = None,
-                    base_system: str | None = None) -> dict:
+                    base_system: str | None = None,
+                    sampling: dict | None = None) -> dict:
         # todos_sync is accepted for signature parity with the loop's spawn;
         # the slash path has no parent list, so child todos events simply
         # forward to the stream (no state to sync). base_system likewise:
@@ -327,6 +328,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
             stream=True,
             verify=verify,
             base_system=base_system,
+            run_overrides=({"sampling": sampling, "sampling_force": True}
+                           if sampling else None),
         )
         await _emit("subagent_finish", {"name": name or "sub-agent", "depth": 1,
                                         "status": child.get("status"),

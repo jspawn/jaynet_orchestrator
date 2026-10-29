@@ -192,6 +192,15 @@ def test_slash_spawn_no_budget_uses_config_defaults():
     asyncio.run(slash_spawn(rt)("do Y"))
     _, kw = rt.calls[0]
     assert kw["budget_overrides"] == {"max_cost_usd": 0.5, "max_iterations": 5}
+    assert kw["run_overrides"] is None
+
+
+def test_slash_spawn_forwards_sampling_override():
+    rt = _FakeRuntime()
+    asyncio.run(slash_spawn(rt)("do Z", sampling={"temperature": 0.2}))
+    _, kw = rt.calls[0]
+    assert kw["run_overrides"] == {"sampling": {"temperature": 0.2},
+                                   "sampling_force": True}
 
 
 def test_slash_spawn_forwards_lifecycle_and_progress():
