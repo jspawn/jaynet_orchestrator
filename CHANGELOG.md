@@ -5,6 +5,26 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.41.1 — 2026-10-29
+
+Patch release driven by the full live tool/skill self-test
+(`docs/selftest-2026-10-29.md`):
+
+- **Specialist delegation:** direct slash calls now forward role sampling to
+  spawned children instead of failing with an unexpected-keyword TypeError.
+- **`code.deps`:** package listing uses `uv pip list` for uv-created venvs,
+  which need not contain pip itself.
+- **`lint.run`:** automatic linter selection is file-type aware; Python files
+  no longer fail because shellcheck also ran. Explicit linter choices and
+  custom registry entries keep their override behavior.
+- **h5i 0.5:** `browser.browse read` uses a one-shot snapshot plus close, and
+  `open` no longer emits the removed `--capture` flag (sessions capture by
+  default). recon/websec/test now share the user-local h5i binary fallback.
+  h5i documentation covers the `agent-browser` runtime requirement.
+- **Report:** full coverage, reproductions and remaining environment limits in
+  `docs/selftest-2026-10-29.md`. All 39 skills loaded; 117 tools verified
+  before the fixes; 2,685 tests pass after them.
+
 ## 1.41.0 — 2026-10-29
 
 Natural recall, evidence-preserving compaction and a large model-routing /
