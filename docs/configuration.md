@@ -84,10 +84,15 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Tool Selection** — which tools the model sees: `auto` = core set +
   keyword-triggered namespaces, with `tools.load` as the mid-run escape
   hatch. The `keyword_namespaces.*` entries are the trigger word lists.
+  `recall.*` prefetches owner-scoped memory only on explicit recall intent;
+  RAG joins in when a collection is configured or named in the request.
+  Retrieval is local, depth-0 only and capped by `max_chars`; private hits
+  taint the run as usual. Automatic RAG is off while `collection` is null.
 - **Compaction** — superseded file-read deduplication and old-result stubs;
-  execution logs keep their command, exit code, head and error tail. Controls:
-  read dedupe, size threshold, recent/pinned-result protection, pass frequency.
-  Events report exact saved characters and estimated saved tokens.
+  execution logs keep their command, exit code, head and error tail, and only
+  the newest image stays inline. Controls: read dedupe, size threshold,
+  recent/pinned-result protection, pass frequency. Full evidence remains in
+  the trace; events report exact saved characters and estimated saved tokens.
 - **Parallel Tools** — run independent approved tool calls of one turn
   concurrently.
 - **Privacy & Confirmation** — the taint model (private results never reach

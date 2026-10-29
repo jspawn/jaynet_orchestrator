@@ -5,6 +5,48 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.41.0 — 2026-10-29
+
+Natural recall, evidence-preserving compaction and a large model-routing /
+eval-harness reliability pass:
+
+- **Scoped natural recall.** Explicit memory questions can prefetch relevant
+  local memories before the brain turn; RAG joins only for a configured or
+  explicitly named collection. Retrieval is owner-scoped, depth-0 only,
+  character-capped, traced and normally privacy-tainting. Automatic RAG stays
+  off until `tool_selection.recall.collection` is set.
+- **Knowledge hygiene.** KG aliases canonicalize alternate entity names, with
+  confirmation-gated merges; weighted associations preserve related context.
+  RAG `min_score` filters weak evidence before reranking and empty evidence
+  explicitly calls for abstention.
+- **Evidence-aware transcript compaction.** Superseded file reads collapse to
+  re-read pointers; old logs retain command, exit code, head and error tail;
+  recent/pinned results and the newest image stay intact. Full evidence remains
+  available through `trace.query`, with exact saved-character and estimated
+  token telemetry.
+- **Model routing and lifecycle reliability.** Vision capability is resolved
+  per child run instead of inherited from the brain. Swap-back evicts the
+  temporary model before restoring the original. Specialist fallback remains
+  available for resilience but is visible in Admin → Status and invalidates
+  affected eval cases instead of silently changing the measured model.
+  Strict specialist chat templates gain a shipped EfficientThink APEX DFlash2
+  preset/template pair.
+- **Multi-backend operations.** Process cards show generation/prefill rates for
+  vLLM and radiance as well as llama.cpp. The HF downloader accepts `.rad`
+  containers and `.recipe` files and drafts radiance-shaped presets.
+- **Eval harness fixes.** BFCL imports use the real final user request and
+  grade per-turn call multisets; blocked calls count as not executed. Fallback
+  evidence is scoped to the case run tree, degraded aliases fail preflight,
+  and invalidated cases receive one bounded retry after recovery. Judges now
+  see exact `ask.user` questions and scripted answers.
+- **Extensible image generation.** `plugins.imagegen.backend` selects a
+  registered backend; new engines reuse the same VRAM hibernation, restoration,
+  output and shutdown lifecycle without changing `image.generate`.
+- **Guidance and dependencies.** The gate prompt discovers current cloud models
+  through `llm.call` instead of a hardcoded list; browser and `code.run`
+  descriptions match current behavior. LiteLLM 1.102.2 and dnspython 2.9.0
+  address current dependency advisories.
+
 ## 1.40.1 — 2026-10-21
 
 External-audit (v1.40.0) follow-ups + dependency advisories:

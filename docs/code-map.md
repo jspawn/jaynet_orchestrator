@@ -21,6 +21,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 | `runtime/compact.py` + `runtime/context_compaction.py` | Whole-chat `/compact` vs. in-run tool-result compaction: stale-read dedupe, evidence-preserving log pruning, recency/pin protection and savings telemetry. `loop.py` invokes the latter. |
 | `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review; module-level check sandbox (`run_check`/`run_authored_check`) + the git baseline plumbing (tree snapshots, detached baseline worktrees) shared by the delegate and the acceptance ledger. |
 | `runtime/selector.py` | Per-run tool-set selection, frozen for prompt-cache stability. |
+| `runtime/recall.py` | Intent-gated, owner-scoped memory/RAG prefetch before depth-0 turns; bounded excerpts, normal privacy taint and trace accounting. |
 | `runtime/selftest.py` | `/selftest` grammar, exact tool/skill scope resolution, and scoped run-prompt construction. |
 | `runtime/subcall.py` | RLM primitive: mediated sub-LLM calls over a per-run Unix socket from sandboxed `code.run`. |
 

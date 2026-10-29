@@ -313,8 +313,12 @@ bulk by tag; results, pass-rate trends and judge notes are kept in
 `prompt_hash`, `config_hash`, `specialist_preset`, `model_files` — so any
 before/after question is a query, and a `fallback` column plus a
 `[fallback: requested X served Y]` judge-notes prefix when LiteLLM
-`fallbacks:` silently routed the request to another model (`model_turn`
-trace events carry the same `served_model`). Budgets are $-primary (`eval.max_cost_usd` per case,
+`fallbacks:` routed the request to another model (`model_turn` trace events
+carry the same `served_model`). Fallback evidence is scoped to the case's run
+tree, so a concurrent chat cannot invalidate it. With `eval.invalid_on_fallback`
+on, suites preflight fallback-source aliases, exclude affected rows from the
+tally, and retry each invalidated case once after the source recovers. Budgets
+are $-primary (`eval.max_cost_usd` per case,
 `eval.suite_max_cost_usd` per bulk run) with iteration/token ceilings off;
 the one safety net is a per-turn wall clock (`eval.turn_wall_clock_s`,
 default 1800 s, 0 = unlimited) so a stuck zero-cost local run can't block a
@@ -353,9 +357,9 @@ string truncates args; built for the prompt-injection cases). Two more keys
 cover tool-calling itself: `stub_tools` registers case-declared function
 schemas as recording stubs and restricts the run to exactly them (the BFCL
 single-turn condition — "these functions, nothing else"), and
-`expect.tool_calls` grades the calls BFCL-style against the trace
-(name + argument matching, optional params via the `""` marker, parallel
-order-insensitive; `[]` = no stub may fire). Set `judge: false` and the
+`expect.tool_calls` grades per-turn call multisets BFCL-style against the
+trace (name + argument matching, optional params via the `""` marker, parallel
+order-insensitive; blocked calls count as never fired; `[]` = no stub may fire). Set `judge: false` and the
 case verdict is these checks alone — no judge spend, no judge noise, and
 no rubric needed. A case may
 also declare a podman **container** — it then runs against the image's real

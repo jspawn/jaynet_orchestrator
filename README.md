@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.40.1** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.41.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -55,7 +55,7 @@ flowchart TB
     U["Browser / voice"] -->|"HTTP + SSE"| WEB["FastAPI console (web/)"]
     subgraph JN["JayNet — one Python service"]
         WEB --> LOOP["Agent loop + guard pipeline<br/>runtime/loop.py"]
-        LOOP --> TOOLS["141 tools · skills · chains<br/>loaded on demand"]
+        LOOP --> TOOLS["144 tools · skills · chains<br/>loaded on demand"]
         PLUG["plugins: imagegen · omnivoice · pageindex · h5i · graphify …"] --> LOOP
         JEV["jevify / CLM sidecar<br/>delegation classifier"] -.-> LOOP
         LOOP -->|"strength gate"| DEL["specialist.delegate · model.use"]
@@ -64,8 +64,8 @@ flowchart TB
     end
     LOOP -->|"stable aliases:<br/>local-orchestrator · local-specialist"| LL["LiteLLM proxy :4000"]
     subgraph GPUs["your GPUs — VRAM is the budget"]
-        BRAIN["llama-server :8090 — BRAIN<br/>small, fast, routing-tuned<br/>resident, hibernates + restores"]
-        SPEC["llama-server :8080 — SPECIALIST<br/>coder / security / creative / vision<br/>swapped in for the task, back after"]
+        BRAIN["model server :8090 — BRAIN<br/>small, fast, routing-tuned<br/>resident, hibernates + restores"]
+        SPEC["model server :8080 — SPECIALIST<br/>llama.cpp / vLLM / radiance<br/>swapped in for the task, back after"]
         AUX[":8095 embed · :8096 rerank · :8099 whisper"]
     end
     PM ==>|"swap in / out"| GPUs
@@ -78,8 +78,8 @@ flowchart TB
 The brain stays loaded and runs every conversation. When a task needs more
 muscle, the strength gate routes it to `specialist.delegate`, the preset
 store decides which model occupies the slot, and the process manager swaps
-the llama-server underneath the alias — then swaps back when the work is
-done. Swaps are scheduled by **measured fit, not guesses**: `model.measure`
+the llama.cpp, vLLM or radiance server underneath the alias — then swaps back
+when the work is done. Swaps are scheduled by **measured fit, not guesses**: `model.measure`
 records each preset's real per-GPU VRAM + RAM footprint (hibernate the box,
 load, probe, write it into the preset), and the loader then lets models
 **share a card when the numbers fit** — a specialist at 50% of a GPU no
@@ -178,17 +178,19 @@ Things to play with when you try it:
   `procedure.save` and re-runs with new inputs via `procedure.run` — zero
   model tokens on reuse) and an **MCP
   bridge** — all in one service, no containers.
-- **Internal context stays compact.** Caveman Compression shrinks hidden
-  reasoning, delegated tasks and reports, direct/subcall LLM replies and
-  model-panel turns at generation time. User-facing answers, code, JSON, commands and
-  verbatim evidence stay exact; each scope has a config switch.
+- **Internal context stays compact and recoverable.** Evidence-aware transcript
+  compaction removes superseded file reads, preserves log commands, exit codes
+  and error tails, and keeps full output available in the trace. Caveman
+  Compression separately shrinks hidden reasoning, delegated tasks and reports,
+  direct/subcall LLM replies and model-panel turns at generation time.
+  User-facing answers, code, JSON, commands and verbatim evidence stay exact.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
 - **Capabilities are opt-in plugins.** Anything beyond the core — like the
   shipped graphify plugin, which maps each project into a queryable graph the
   agent queries instead of grepping files, benchlab, which imports public
-  agent benchmarks (Terminal-Bench, GAIA) as eval cases, imagegen (local
-  text-to-image — Qwen-Image on stable-diffusion.cpp; hibernates the
+  agent benchmarks (Terminal-Bench, GAIA) as eval cases, imagegen (backend-
+  extensible local text-to-image — Qwen-Image on stable-diffusion.cpp by default; hibernates the
   configured slots for the VRAM while it draws, brain included when a big
   image needs both GPUs, and restores them with a readiness wait), omnivoice (local
   text-to-speech with voice design, emotion tags and cloning — OmniVoice on
@@ -408,23 +410,25 @@ For the technically curious, the whole surface at a glance:
   OmniVoice on omnivoice.cpp; pair it with the `read-aloud` chain for
   expressive, voice-tagged readings). LiteLLM
   proxy unifies local
-  and cloud. llama.cpp is the native runtime (JayNet launches and places it
-  for you), but a server you already have running — vLLM, Ollama, another
-  llama.cpp box on the LAN — can be adopted as a *remote preset* and used
-  like a local model ([placement](docs/model-placement.md),
-  [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopt-existing-server)).
-- **119 tools (+22 plugin tools) + skills + chains** — plugin-discovered tools, on-demand
+  and cloud. JayNet launches and places llama.cpp, vLLM and radiance servers
+  through backend-typed presets; an existing vLLM, Ollama or llama.cpp server
+  on the LAN can instead be adopted as a *remote preset* and used like a local
+  model ([placement](docs/model-placement.md),
+  [backend presets](docs/models.md#backend-typed-presets), [adopted servers](docs/models.md#adopt-existing-server)).
+- **122 tools (+22 plugin tools) + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
   [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
   in the browser — `/wgs` does it as a guided chat session — and shares them
   as `.jaypack`.
-- **Memory & knowledge** — salience-weighted compaction, RAG collections,
+- **Memory & knowledge** — explicit recall questions can prefetch bounded,
+  owner-scoped memory and optional collection-scoped RAG evidence; KG aliases
+  keep entity names canonical. Salience-weighted compaction, RAG collections,
   an LLM-maintained wiki (`/llmwiki`), and a `/charter` interview that seeds
-  a new project's wiki before any code exists. The surfaces talk: graphify
-  turns wiki pages into project-graph nodes, `graph.seed_kg` seeds a project
-  graph into the curated knowledge graph, and project-bound `rag.search`
-  answers carry the graph neighborhood of their hits.
+  a new project's wiki cover the longer-lived surfaces. Graphify turns wiki
+  pages into project-graph nodes, `graph.seed_kg` seeds a project graph into
+  the curated knowledge graph, and project-bound `rag.search` answers carry
+  the graph neighborhood of their hits.
 - **Privacy guardrails** — private tool namespaces taint the conversation;
   cloud calls refused while tainted unless explicitly shared; approval-gated
   cloud escalation ([security posture](docs/security.md)).

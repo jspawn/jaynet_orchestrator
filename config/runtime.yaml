@@ -613,11 +613,6 @@ chains:
 #   all    - expose every tool every turn (default; zero behaviour change)
 #   static - expose only the caller's --tools allowlist (else all)
 #   auto   - core_namespaces + any namespace whose keyword appears in the message
-# Transcript compaction. The loop re-sends the WHOLE conversation each turn, so old
-# tool results keep costing tokens. Past `keep_last`, superseded file reads become
-# re-read pointers; large logs keep their head/error tail and other large results a
-# head snippet. Full evidence stays in trace.query. System/user/assistant messages
-# are never touched. Batched every 3rd iteration to amortize prompt-cache breaks.
 models:
   # SQLite preset catalog: the admin Models → Presets subtab edits the DB, not this file.
   # The presets: below are the FACTORY SEED — imported into the DB on first
@@ -762,6 +757,11 @@ architect:
                             # otherwise one executor runs the plan as before.
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
+# Transcript compaction. The loop re-sends the WHOLE conversation each turn, so old
+# tool results keep costing tokens. Past `keep_last`, superseded file reads become
+# re-read pointers; large logs keep their head/error tail and other large results a
+# head snippet. Full evidence stays in trace.query. System/user/assistant messages
+# are never touched. Batched every 3rd iteration to amortize prompt-cache breaks.
 compaction:
   enabled: true
   dedupe_reads: true         # remove superseded fs.read results, even small ones;

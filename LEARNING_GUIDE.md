@@ -18,7 +18,7 @@ numbers are stable (docs and code cross-reference them), so Part 2
 keeps its original §3.x numbering.
 
 - **Part 1:** §1 Overview · §2 JayNet examples · §3 Short deep dive
-  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.27) · §4 Links + cheat sheet
+  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.29) · §4 Links + cheat sheet
 - **Part 2:** §3.15 Three decisions worth stealing · §3.16
   Benchmarking the brain · §3.20 Show the budget
 
@@ -849,6 +849,52 @@ not. Backend translation and vision capabilities are covered in
 tests prove that it serves, and only paired behavioral evals prove that it is
 still the brain you meant to run.
 
+### 3.28 Recall on demand, compaction without evidence loss
+
+Memory tools are useful only when retrieval happens at the right moment.
+Prefetching every memory and document into every turn would tax the prompt and
+invite irrelevant private context; waiting for a small model to choose
+`memory.search` means natural questions often never retrieve anything. JayNet's
+compromise is **intent-gated recall**: an explicit memory question can prefetch
+a few owner-scoped hits before the first brain turn, while RAG additionally
+requires a configured or explicitly named collection. The evidence is capped,
+traced and privacy-tainted like an ordinary tool result. Storage requests do
+not trigger reads, and child runs do not inherit the prefetch.
+
+Retrieval quality still needs an abstention path. RAG's `min_score` is applied
+**before** reranking: a stronger second stage may order good candidates, but it
+must not resurrect evidence that already failed the relevance floor. In the
+knowledge graph, aliases keep alternate names pointed at one canonical entity;
+merging existing entities is explicit and confirmation-gated. These are small
+mechanisms for the same principle: retrieval should add evidence, not confidence.
+
+Compaction gets the complementary treatment. Replacing every old tool result
+with a generic stub saves tokens but destroys exactly the error tail or command
+needed for recovery. The evidence-aware pass therefore removes superseded file
+slices, keeps both ends of execution logs plus their exit codes, protects
+recent/pinned results and retains only the newest inline image. Nothing is
+irrecoverable: the trace keeps the full result. The lesson is to compact by
+**future usefulness**, not just size.
+
+### 3.29 A fallback is a different experiment
+
+Model routing needs the same provenance discipline as model conversion (§3.27).
+If a specialist fails and LiteLLM serves the brain instead, the run may look
+healthy while no longer testing the specialist at all. JayNet now records the
+requested and served aliases, surfaces recent fallbacks in Admin → Status, and
+marks affected eval rows invalid by default. Scoping that evidence to the eval
+run tree matters: a concurrent chat's fallback must not poison an unrelated
+case. Preflight catches a degraded source before a suite, and one bounded retry
+absorbs a model that recovers mid-suite without creating a retry loop.
+
+Capabilities are per target, too. A vision brain does not make a text-only
+specialist multimodal, so child runs resolve `caps.vision` from the preset
+actually serving their alias. Finally, restoration is another placement
+operation, not a simple start: evict the temporary swap-in first, then restore
+the original onto its measured hardware. The general lesson: **a successful
+response proves neither which model answered nor that the box returned to its
+intended state — record both.**
+
 ---
 
 ## 4. Links for more
@@ -1100,5 +1146,5 @@ ablation says prove it.
 
 ---
 
-*Theory companion for JayNet v1.40.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.41.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*
