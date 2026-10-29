@@ -271,6 +271,17 @@ def test_deps_list_parses_freeze_output(project, ctx, deps_fake, monkeypatch):
     assert deps_fake.calls == [[str(py), "-m", "pip", "list", "--format=freeze"]]
 
 
+def test_deps_list_uses_uv_for_unseeded_venv(project, ctx, deps_fake, monkeypatch):
+    _touch_venv_python(project)
+    monkeypatch.setattr(DEPS.shutil, "which", lambda name: "/usr/bin/uv")
+    deps_fake.responses = [(0, "httpx==0.28.1\n", "")]
+    r = asyncio.run(CodeDeps().execute({"action": "list"}, ctx()))
+    assert r.status == "ok" and r.result["packages"] == ["httpx==0.28.1"]
+    py = (project / ".venv").resolve() / "bin" / "python"
+    assert deps_fake.calls == [
+        ["/usr/bin/uv", "pip", "list", "--python", str(py), "--format=freeze"]]
+
+
 def test_deps_list_requires_existing_venv(project, ctx, deps_fake, monkeypatch):
     monkeypatch.setattr(DEPS.shutil, "which", lambda name: None)
     r = asyncio.run(CodeDeps().execute({"action": "list"}, ctx()))

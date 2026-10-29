@@ -112,7 +112,9 @@ class CodeDeps(Tool):
             if not py.exists():
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=f"no venv at {venv}; run action=create first")
-            rc, out, err = await _run([str(py), "-m", "pip", "list", "--format=freeze"], project)
+            list_argv = ([uv, "pip", "list", "--python", str(py), "--format=freeze"]
+                         if uv else [str(py), "-m", "pip", "list", "--format=freeze"])
+            rc, out, err = await _run(list_argv, project)
             if rc != 0:
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=_tail(err or out))
