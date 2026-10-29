@@ -34,13 +34,13 @@ class ImageGenerate(Tool):
     name = "image.generate"
     read_only = False
     description = (
-        "Generate an image locally from a text prompt (Qwen-Image on this "
-        "machine — no cloud, nothing leaves the box). Writes a PNG and "
-        "hands it to the user as a download, and returns its path. NOTE: "
-        "this hibernates the configured model slot(s) (default: the "
-        "specialist) for the VRAM — they restart automatically after an "
-        "idle keep-warm window — so do not call it while a delegation "
-        "needs one of them."
+        "Generate an image locally from a text prompt through the configured "
+        "imagegen backend (default: Qwen-Image on stable-diffusion.cpp — no "
+        "cloud, nothing leaves the box). Writes a PNG and hands it to the "
+        "user as a download, and returns its path. NOTE: this hibernates "
+        "the configured model slot(s) (default: the specialist) for the "
+        "VRAM — they restart automatically after an idle keep-warm window — "
+        "so do not call it while a delegation needs one of them."
     )
     parameters = {
         "type": "object",
@@ -51,7 +51,8 @@ class ImageGenerate(Tool):
                                       "to render (Qwen-Image is good at "
                                       "rendering quoted text)."},
             "negative_prompt": {"type": "string",
-                                "description": "What to avoid (optional)."},
+                                "description": "What to avoid (optional; "
+                                               "stable-diffusion.cpp backend)."},
             "size": {"type": "string",
                      "description": "WxH, e.g. 1024x1024 (default), "
                                     "1328x1328, 1664x928, 928x1664."},
@@ -149,6 +150,7 @@ class ImageGenerate(Tool):
                 "bytes": out["bytes"],
                 "size": out["size"],
                 "steps": out["steps"],
+                "backend": out.get("backend", "sd"),
                 "note": ("image ALREADY handed to the user as a download — "
                          "do NOT call deliver.files; just mention the file "
                          "in your reply" if delivered else

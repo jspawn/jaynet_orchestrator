@@ -412,7 +412,7 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 
 | Tool | Description | Flags |
 |---|---|---|
-| `image.generate` | Generate an image locally from a text prompt (Qwen-Image on this machine — no cloud, nothing leaves the box). Writes a PNG and han… |  |
+| `image.generate` | Generate an image locally from a text prompt through the configured imagegen backend (default: Qwen-Image on stable-diffusion.cpp… |  |
 
 ### jev (plugin: jev)
 

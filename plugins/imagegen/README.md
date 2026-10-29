@@ -75,6 +75,15 @@ plugins:
 Defaults point at the paths above; a missing binary/model makes
 `image.generate` fail with a pointer here — nothing else breaks.
 
+## Adding another backend
+
+Set `plugins.imagegen.backend` to select a registry key (`sd` by default).
+A new backend subclasses `BaseImageServer` in `server.py` and implements
+`_check_files`, `_healthy`, `ensure_up`, and `_generate_png`; register an
+instance in `BackendRouter`. Slot swapping, cancellation cleanup, PNG
+output, and keep-warm restoration stay shared — `image.generate` and its
+delivery contract do not change.
+
 ## Notes
 
 - Generation takes ~1–4 min on RDNA4 (20B DiT); first call also pays the

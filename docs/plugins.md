@@ -283,8 +283,11 @@ turn calls it), with a readiness poll (`restore_ready_timeout_s`, default
 keep-warm window. The restore is cancel-safe — it runs on `BaseException`,
 never leaks a hibernated slot. The documented trade: in-flight work on a
 hibernated slot is not waited out (single-user box, same trade as the
-delegation hibernation). sd-server is registered on the JayNet
-shutdown path — no GPU-resident orphan if the service stops mid keep-warm.
+delegation hibernation). Every registered image backend is covered by the
+JayNet shutdown path — no GPU-resident orphan if the service stops mid
+keep-warm. `plugins.imagegen.backend` selects the engine (`sd` by default);
+new backends implement the small transport contract in `server.py` and reuse
+the same slot/output lifecycle without changing `image.generate`.
 
 ### omnivoice — local text-to-speech (omnivoice.cpp)
 

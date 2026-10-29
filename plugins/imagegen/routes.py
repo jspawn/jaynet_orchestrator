@@ -1,7 +1,7 @@
 """imagegen lifecycle hooks — no HTTP routes. Exists so the plugin loader's
 register_routes() wires the shutdown hook: a JayNet stop during a keep-warm
-window must down sd-server instead of orphaning a GPU-resident process
-(audit #24 D5). The hibernated slot is intentionally NOT woken here — the
+window must down every registered image backend instead of orphaning a
+GPU-resident process (audit #24 D5). The hibernated slot is intentionally NOT woken here — the
 next boot's process posture restarts slots; starting a model mid-shutdown
 would race the stop.
 """

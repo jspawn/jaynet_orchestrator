@@ -123,7 +123,7 @@ def test_check_files_missing(server):
     mod, cfg, tmp = server
     bad = {"plugins": {"imagegen": {"sd_binary": "/nope/x"}}}
     with pytest.raises(mod.ImagegenError, match="README"):
-        mod.SERVER._check_files(mod.settings(bad))
+        mod.SERVER.backends["sd"]._check_files(mod.settings(bad))
 
 
 def test_generate_swaps_and_restores(server, monkeypatch, tmp_path):
@@ -277,17 +277,17 @@ def test_tool_mirrors_png_into_workspace(server, monkeypatch, tmp_path):
 
 
 def test_routes_register_appends_shutdown_hook(server):
-    """Audit #24 D5: a JayNet stop during a keep-warm window must down
-    sd-server, not orphan a GPU-resident process."""
+    """A JayNet stop during keep-warm must down the active image backend."""
     mod, cfg, _ = server
     routes = _load("imagegen_plugin_routes", "routes.py")
     state = SimpleNamespace(shutdown_hooks=[])
     routes.register(None, state)
     assert len(state.shutdown_hooks) == 1
     fake = _FakePopen(["sd"])
-    mod.SERVER.proc = fake
+    backend = mod.SERVER.backends["sd"]
+    backend.proc = fake
     asyncio.run(state.shutdown_hooks[0]())
-    assert fake.killed and mod.SERVER.proc is None
+    assert fake.killed and backend.proc is None
     sys.modules.pop("imagegen_plugin_routes", None)
 
 
@@ -591,3 +591,34 @@ def test_tool_mirror_failure_keeps_original_path(server, monkeypatch,
     p = Path(res.result["path"])
     assert p.exists() and p.read_bytes() == PNG_1PX
     assert p.parent == tmp_path / "images"
+
+
+def test_backend_router_defaults_to_sd_and_rejects_unknown(server):
+    mod, _, _ = server
+    assert mod.settings({})["backend"] == "sd"
+    assert isinstance(mod.SERVER.backends["sd"], mod.SdServer)
+    bad = {"plugins": {"imagegen": {"backend": "missing"}}}
+    with pytest.raises(mod.ImagegenError, match="available: sd"):
+        asyncio.run(mod.SERVER.generate(bad, {"prompt": "x"}))
+
+
+def test_backend_router_marks_result_and_downs_every_backend(server):
+    mod, _, _ = server
+
+    class _FakeBackend:
+        def __init__(self):
+            self.down_calls = 0
+
+        async def generate(self, config, args):
+            return {"path": "fake.png"}
+
+        async def down(self):
+            self.down_calls += 1
+
+    selected, other = _FakeBackend(), _FakeBackend()
+    router = mod.BackendRouter({"fake": selected, "other": other})
+    cfg = {"plugins": {"imagegen": {"backend": "fake"}}}
+    out = asyncio.run(router.generate(cfg, {"prompt": "x"}))
+    assert out == {"path": "fake.png", "backend": "fake"}
+    asyncio.run(router.down())
+    assert selected.down_calls == other.down_calls == 1

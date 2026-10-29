@@ -1594,6 +1594,7 @@ plugins:
                              # the PNG to DATA/images, restores the slots after
                              # keep_warm_s idle (the brain comes back right after the
                              # generation, with a readiness wait).
+    # backend: sd                # image engine registry key (currently only sd)
     # sd_binary: /srv/jaynet-bin/sd-server
     # diffusion_model: /srv/models/<repo>/qwen-image-2.1-UC-Q4_K_M.gguf
     # text_encoder:  /srv/models/<repo>/text_encoders/qwen3vl_8b_int8_convrot.safetensors
