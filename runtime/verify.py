@@ -479,8 +479,8 @@ class VerifyMixin:
 
     def _normalize_verify(self, verify):
         """A verify arg — a command string, or {command, protect?, max_checks?,
-        timeout_s?}, or {hook, ...} with an async callable — into a full spec,
-        or None. Config agent.verify fills defaults.
+        timeout_s?, expected_exit?}, or {hook, ...} with an async callable —
+        into a full spec, or None. Config agent.verify fills defaults.
 
         The hook form is for callers whose check can't be expressed as a
         sandboxed shell command in the work_root (the eval harness's per-case
@@ -534,6 +534,8 @@ class VerifyMixin:
                           or _paths(vcfg.get("unprotect")) or []),
             "max_checks": int(verify.get("max_checks") or vcfg.get("max_checks", 4)),
             "timeout_s": int(verify.get("timeout_s") or vcfg.get("timeout_s", 180)),
+            "expected_exit": int(verify.get("expected_exit",
+                                            vcfg.get("expected_exit", 0))),
         }
 
     @staticmethod
@@ -559,9 +561,10 @@ class VerifyMixin:
         return await run_check(command, cwd, timeout, ctx.config)
 
     async def _verify(self, spec, state, ctx, work_root):
-        """Run the verifier once. Returns (passed, report). Fails on non-zero exit,
-        a change to any protected test/check file (tampering), or a vacuous pass
-        (exit 0 but zero tests executed)."""
+        """Run the verifier once. Returns (passed, report). Fails on an exit
+        other than expected_exit (default 0), a change to any protected
+        test/check file (tampering), or a vacuous pass (exit 0 but zero tests
+        executed)."""
         cwd = Path(work_root) if work_root else Path(".")
         code, out = await self._run_verify_command(spec["command"], cwd, spec["timeout_s"], ctx)
         tail = "\n".join((out or "").splitlines()[-40:])[-4000:]
@@ -620,21 +623,22 @@ class VerifyMixin:
             return False, ("VERIFIER TAMPERING — the protected test/check files changed: "
                            f"{', '.join(tampered[:10])}. Revert them; make the real code "
                            "satisfy the existing tests, do not edit the tests.") + _note
+        expected = spec.get("expected_exit", 0)
         if code == 0 and _VACUOUS_VERIFY_RE.search(out or ""):
             return False, ("The check exited 0 but executed NO tests — that is not a pass. "
                            f"Make the tests actually run.\n\n{tail}") + _note
-        if code == 0:
-            return True, f"verifier passed: `{spec['command']}`" + _note
-        # Pre-existing red: the baseline pre-run (loop, before the agent
-        # started) failed with the identical signature — this failure is not
-        # the agent's and chasing it would burn its checks. Accept as
-        # "not worse", with the caveat stated in the report.
+        if code == expected:
+            return True, (f"verifier passed: `{spec['command']}` exited with "
+                          f"expected exit {expected}") + _note
+        # Pre-existing red only satisfies the normal expected-zero contract.
+        # An explicit expected-red phase requires its exact documented code.
         pre = state.get("pre") or {}
-        if pre.get("code") not in (None, 0) and _verify_sig(out) == pre.get("sig"):
+        if (expected == 0 and pre.get("code") not in (None, 0)
+                and _verify_sig(out) == pre.get("sig")):
             return True, (f"verifier: `{spec['command']}` still fails, but the "
                           "failure is IDENTICAL to the pre-existing baseline "
                           "(it was red before your changes) — accepted as "
                           "'not worse'. State the pre-existing failure in your "
                           "summary; do not try to fix it or touch its tests.") + _note
-        return False, (f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"
-                       + _note)
+        return False, (f"verifier FAILED (exit {code}, expected {expected}) — "
+                       f"`{spec['command']}`:\n{tail}" + _note)

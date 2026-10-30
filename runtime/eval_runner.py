@@ -1138,23 +1138,26 @@ _BLOCKED_SUFFIX = " (blocked)"
 
 
 def _stub_call_turns(rows, names: set[str]
-                     ) -> tuple[list[list[str]], list[list[tuple[str, dict]]]]:
-    """Per-turn stub-call buckets from the trace's tool_result/model_start
-    rows; a turn is the span between model_start events. Returns
-    (attempts, fired) per turn — attempts = every stub call ok or not,
-    fired = executed (status ok) calls with args. Blocked entries
-    ("name (blocked)") never executed and count as neither."""
+                     ) -> tuple[list[list[str]], list[list[tuple[str, dict]]],
+                                list[list[str]]]:
+    """Per-turn stub-call buckets from tool_result/model_start rows; a turn
+    is the span between model_start events. Returns (attempts, fired, blocked):
+    attempts = every non-blocked stub call ok or not, fired = executed (status
+    ok) calls with args, blocked = gate-refused calls (diagnostics only)."""
     turns_attempts: list[list[str]] = []
     turns_fired: list[list[tuple[str, dict]]] = []
+    turns_blocked: list[list[str]] = []
     attempts: list[str] = []
     fired: list[tuple[str, dict]] = []
+    blocked: list[str] = []
     started = False
     for kind, pj in rows:
         if kind == "model_start":
             if started:                          # close the previous turn
                 turns_attempts.append(attempts)
                 turns_fired.append(fired)
-                attempts, fired = [], []
+                turns_blocked.append(blocked)
+                attempts, fired, blocked = [], [], []
             started = True
             continue
         try:
@@ -1162,7 +1165,12 @@ def _stub_call_turns(rows, names: set[str]
         except Exception:
             continue
         tool = str(d.get("tool") or "")
-        if tool.endswith(_BLOCKED_SUFFIX) or tool not in names:
+        if tool.endswith(_BLOCKED_SUFFIX):
+            bare = tool[:-len(_BLOCKED_SUFFIX)]
+            if bare in names:
+                blocked.append(bare)
+            continue
+        if tool not in names:
             continue
         attempts.append(tool)
         if str(d.get("status") or "") == "ok" \
@@ -1170,7 +1178,8 @@ def _stub_call_turns(rows, names: set[str]
             fired.append((tool, d["args"]))
     turns_attempts.append(attempts)
     turns_fired.append(fired)
-    return turns_attempts, turns_fired
+    turns_blocked.append(blocked)
+    return turns_attempts, turns_fired, turns_blocked
 
 
 def _tool_call_grades(run_ids: list[str], stub_names: list[str],
@@ -1188,9 +1197,9 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
     discarded (live: bfcl-multiple-10 turn 2, bfcl-parallel-9 turn 3 graded
     "never fired"). Retry storms still fail: every turn whose multiset
     misses keeps the failure (reported against the first turn). Irrelevance
-    cases (expected == []) keep the stricter rule: ANY stub attempt in ANY
-    turn fails, ok or not — a turn that refrained must not excuse one that
-    didn't.
+    cases (expected == []) keep the stricter rule: ANY non-blocked stub attempt
+    in ANY turn fails, ok or not — a turn that refrained must not excuse one
+    that didn't. Diagnostics separate attempts, executed calls and blocked calls.
 
     Trace oddities (missing db, stripped args) degrade to no failures, the
     same posture as the canary check."""
@@ -1214,10 +1223,17 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
             con.close()
     except Exception:
         return []
-    turns_attempts, turns_fired = _stub_call_turns(rows, names)
+    turns_attempts, turns_fired, turns_blocked = _stub_call_turns(rows, names)
     if not expected:
         attempts = [n for turn in turns_attempts for n in turn]
-        return match_calls([], [(n, {}) for n in attempts])
+        blocked = [n for turn in turns_blocked for n in turn]
+        if not attempts:
+            return []
+        executed = sum(len(turn) for turn in turns_fired)
+        names_txt = ", ".join(attempts + blocked)
+        return [f"irrelevance: no function call expected, but "
+                f"{len(attempts) + len(blocked)} attempted "
+                f"({executed} executed, {len(blocked)} blocked): {names_txt}"]
     for fired in turns_fired:
         if not match_calls(expected, fired):
             return []                      # one exact-matching turn suffices
@@ -1300,14 +1316,16 @@ def _normalize_exact(s: str) -> str:
 
 
 def _exact_candidates(answer: str) -> list[str]:
-    """What the agent 'meant' as its final answer: text after the last
-    'final answer:' marker, else the last non-empty line, else the whole
-    answer — compared normalized against answer_exact_any."""
+    """What the agent 'meant' as its final answer: the marker's answer line,
+    text after the last 'final answer:' marker, else the last non-empty line,
+    else the whole answer — compared normalized against answer_exact_any."""
     import re
     cands: list[str] = []
     parts = re.split(r"final answer\s*[:：]", answer, flags=re.IGNORECASE)
     if len(parts) > 1 and parts[-1].strip():
-        cands.append(parts[-1].strip())
+        marked = parts[-1].strip()
+        cands.append(marked.splitlines()[0].strip())
+        cands.append(marked)
     lines = [l.strip() for l in answer.splitlines() if l.strip()]
     if lines:
         cands.append(lines[-1])
@@ -2023,10 +2041,12 @@ async def _setup_case_run(runtime, case: EvalCase,
         fixed = bool(stub_names)
         if stub_names:
             safe_tools = list(stub_names)
-            # Zero calls are correct for irrelevance rows; this guard would
-            # demand code.run/web.search, which stub-only runs do not expose.
-            if "just_reply" not in guards_off:
-                guards_off.append("just_reply")
+            # Stub-only runs expose no files, delegate or general compute lane.
+            # Disable guards that demand those unavailable actions or mistake
+            # read-only stub calls for a stall; they only create retry storms.
+            for guard in ("just_reply", "stall_check", "deliverable"):
+                if guard not in guards_off:
+                    guards_off.append(guard)
         if (variant or {}).get("harness") == "brain":
             safe_tools = [t for t in safe_tools
                           if t not in _BRAIN_VARIANT_EXCLUDED]

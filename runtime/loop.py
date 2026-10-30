@@ -2060,9 +2060,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if any(k in user_message.lower() for k in st.exactness_keywords):
                 _has_council = (rs.allowed is None or "council.vote" in rs.allowed) \
                     and self.registry.get("council.vote") is not None
-                _how = ("council.vote self-consistency or an independent "
-                        "recompute" if _has_council else
-                        "an independent recompute")
+                _how = ("council.vote self-consistency FIRST; an independent "
+                        "recompute may follow as an additional check"
+                        if _has_council else "an independent recompute")
                 rs.todo_list.requirements = list(rs.todo_list.requirements) + [
                     f"[must] Exactness demanded: verify the answer before "
                     f"finalizing — {_how}, not a single guess"]

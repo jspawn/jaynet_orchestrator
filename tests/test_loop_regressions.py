@@ -2626,6 +2626,8 @@ def test_exactness_demand_seeds_verification_requirement():
     bounces = _fresh_bounces(seen)
     assert len(bounces) == 1
     assert "Exactness demanded" in bounces[0]["content"]
+    assert "council.vote self-consistency FIRST" in bounces[0]["content"]
+    assert "or an independent recompute" not in bounces[0]["content"]
     assert out["answer"].startswith("3")
 
 

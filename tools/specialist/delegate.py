@@ -493,10 +493,12 @@ class SpecialistDelegate(Tool):
             "verify": {
                 "description": "Ground-truth done-check the coder must satisfy before "
                                "returning — a command string ('pytest -q', 'ruff check "
-                               ".', 'npm test') or {command, protect, max_checks}. Until "
-                               "it exits 0 the child keeps iterating on the failure "
-                               "output, and it cannot edit the tests to pass them "
-                               "(they're hash-guarded). Strongly prefer setting this: a "
+                               ".', 'npm test') or {command, protect, max_checks, "
+                               "expected_exit}. The command must exit with expected_exit "
+                               "(default 0); for a TDD red phase, set expected_exit to "
+                               "the test runner's documented failure code. Other exits "
+                               "keep the child iterating, and it cannot edit protected "
+                               "tests to force a pass. Strongly prefer setting this: a "
                                "coding loop gated on real tests is the difference between "
                                "'looks done' and 'is done'.",
             },

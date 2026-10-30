@@ -377,8 +377,9 @@ agent:
     after: 2                    # no-progress turns between rungs; 0 disables
   # Exactness gate: an explicit accuracy demand in the request ("needs to be
   # exact", "don't guess") seeds a [must] verification requirement — the
-  # requirements bounce then forces council.vote self-consistency (or an
-  # independent recompute) before the final answer is accepted. Live:
+  # requirements bounce then forces council.vote self-consistency FIRST when
+  # available (an independent recompute may follow; without the tool, recompute
+  # alone is allowed) before the final answer is accepted. Live:
   # council-vote answered the strawberry count in 65s without ever voting.
   exactness_gate: true
   exactness_keywords: []        # override the demand phrases; [] = built-ins
@@ -564,10 +565,11 @@ agent:
     # code change.
     instructions: ""
   # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
-  # specialist.delegate). The child isn't "done" until the check exits 0; on failure it
-  # iterates on the output (bounded by max_checks and its budget), and it may not
-  # edit the protected test/check files to force a pass. Defaults below fill in
-  # anything the spawn call's verify spec omits.
+  # specialist.delegate). The child isn't "done" until the check exits with the
+  # per-call expected_exit (default 0; use the runner's failure code for a TDD red
+  # phase). Other exits feed back into the run (bounded by max_checks and its budget),
+  # and protected test/check files may not be edited to force a pass. Defaults below
+  # fill in anything the spawn call's verify spec omits.
   verify:
     max_checks: 4               # verify attempts before the run returns "unverified"
     stall_after: 2              # stop early if the SAME failure recurs this many times

@@ -1514,6 +1514,11 @@ def test_check_expectations_answer_exact_any():
         case, [_turn(answer="working...\nFINAL ANSWER: 1,000.")]) == []
     assert eval_runner.check_expectations(
         case, [_turn(answer="working...\nFINAL ANSWER: One Thousand")]) == []
+    # Trailing explanation must not swallow the marker's answer line
+    # (regression: gaia-935e2cff answered "Research" correctly, then explained).
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="working...\nFINAL ANSWER: One Thousand\n"
+                          "This follows from the definition above.")]) == []
     assert eval_runner.check_expectations(
         case, [_turn(answer="computed it above\n1,000")]) == []
     assert eval_runner.check_expectations(

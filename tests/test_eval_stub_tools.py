@@ -146,6 +146,19 @@ def test_tool_call_grades_irrelevance(tmp_path, monkeypatch):
     assert fails and "irrelevance" in fails[0]
 
 
+def test_tool_call_grades_separates_attempts_executed_and_blocked(
+        tmp_path, monkeypatch):
+    db = _trace_db(tmp_path, [
+        ("r1", {"tool": "bfcl.calc", "status": "ok", "args": {"base": 10}}),
+        ("r1", {"tool": "bfcl.calc", "status": "error", "args": {"base": 11}}),
+        ("r1", {"tool": "bfcl.calc (blocked)", "status": "error",
+                "args": {"base": 12}}),
+    ])
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    fails = eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], [])
+    assert fails and "3 attempted (1 executed, 1 blocked)" in fails[0]
+
+
 def test_tool_call_grades_ignores_non_ok_for_matching(tmp_path, monkeypatch):
     db = _trace_db(tmp_path, [
         ("r1", {"tool": "bfcl.calc", "status": "error",
@@ -265,7 +278,8 @@ def test_run_case_stub_tools_restricts_and_grades(tmp_path, monkeypatch):
     assert row["judge_model"] == "none (judge: off)"
     # run saw ONLY the stub tool (BFCL single-turn condition)
     assert rt.calls[0][1]["tools"] == ["bfcl.calc"]
-    assert rt.calls[0][1]["guards_off"] == ["just_reply"]
+    assert rt.calls[0][1]["guards_off"] == [
+        "just_reply", "stall_check", "deliverable"]
     # and the stub was unregistered afterwards
     assert "bfcl.calc" not in [t.name for t in rt.registry.all()]
 
@@ -281,7 +295,8 @@ def test_run_case_stub_tools_preserves_variant_guards_off(tmp_path, monkeypatch)
     run(eval_runner.run_case(
         rt, _bfcl_case(), store,
         variant={"label": "guard-ablation", "guards_off": ["deliverable"]}))
-    assert rt.calls[0][1]["guards_off"] == ["deliverable", "just_reply"]
+    assert rt.calls[0][1]["guards_off"] == [
+        "deliverable", "just_reply", "stall_check"]
 
 
 def test_run_case_stub_tools_mismatch_fails(tmp_path, monkeypatch):

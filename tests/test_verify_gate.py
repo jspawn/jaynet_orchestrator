@@ -103,6 +103,23 @@ def test_fail_on_nonzero_exit():
     assert not ok and "FAILED" in rep
 
 
+def test_expected_nonzero_exit_allows_tdd_red_phase():
+    """An explicit expected-red check is done on its documented failure code,
+    not forced to implement until pytest goes green (code-feature-spec)."""
+    s = _Stub()
+    spec = s._normalize_verify({"command": "pytest -q", "expected_exit": 2})
+    assert spec["expected_exit"] == 2
+    assert s._normalize_verify("pytest -q")["expected_exit"] == 0
+    root, pats = _mktests(); base = _snap(root, pats)
+    s._run_verify_command = lambda *a, **k: _val((2, "ModuleNotFoundError"))
+    ok, rep = _run(s, spec, base, root)
+    assert ok and "expected exit 2" in rep
+
+    s._run_verify_command = lambda *a, **k: _val((0, "1 passed"))
+    ok, rep = _run(s, spec, base, root)
+    assert not ok and "expected 2" in rep
+
+
 def test_fail_on_test_tampering():
     root, pats = _mktests("def test(): assert real_impl()")
     base = _snap(root, pats)
