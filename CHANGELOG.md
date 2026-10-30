@@ -5,13 +5,18 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.41.2 — 2026-10-30
 
 - **Versioned per-brain overlays:** accepted eval lessons now target the brain
   preset that produced the evidence instead of global prompt/skill/tool/config
   artifacts. Complete snapshots retain proposal/experiment provenance, support
   stale-base protection, idempotent accept and copy-on-rollback in Admin → Eval
   → Proposals. Eval results record overlay version and hash; nothing auto-applies.
+- **Eval reliability:** GAIA accepts answer markers with trailing prose,
+  specialist verification supports expected-red TDD phases, council voting
+  requires the vote before recomputation, and BFCL stub cleanup/diagnostics are
+  more reliable.
+- **Docs:** refreshed admin screenshots, including version history in Proposals.
 
 ## 1.41.1 — 2026-10-29
 
