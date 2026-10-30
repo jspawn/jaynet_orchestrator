@@ -40,7 +40,7 @@ import yaml
 
 from runtime.env import env
 
-from . import cloud_gate, protocol
+from . import brain_overlays, cloud_gate, protocol
 from .budget import BudgetExceeded
 from .context_compaction import compact_messages as _compact_messages_detailed
 from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
@@ -991,15 +991,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    disabled). None (default) = all guards active.
         """
         run_id = run_id or str(uuid.uuid4())
+        # The serving preset's accepted lessons layer below explicit run and
+        # experiment overrides. Everything is a run-local view: the shared
+        # runtime config, prompt files and tool registry stay untouched.
+        _ro, run_config, extra_system = brain_overlays.prepare_run(
+            self.config, model or self.model, run_overrides, extra_system,
+            _patch_run_config)
         # Per-run config resolution (budgets/compaction/sampling/guard
         # thresholds/...) moved to runtime/run_setup.py (audit #1 follow-up)
         # — the rationale comments moved with it. Aliases below keep the
         # rest of run() readable; `st` is the authoritative source.
-        st = parse_run_settings(self.config, run_overrides=run_overrides,
+        st = parse_run_settings(run_config, run_overrides=_ro,
                                 budget_overrides=budget_overrides, model=model,
                                 default_model=self.model, depth=depth)
         eff_model = st.eff_model
-        _ro = run_overrides or {}
         eff_sampling = st.sampling
         eff_parallel = st.parallel
         _lg = st.lg_cfg
@@ -1169,8 +1174,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         ctx = ToolContext(
             request_id=run_id,
-            config=_patch_run_config(self.config, _ro.get("tools_patch"),
-                                     _ro.get("config_patch")),
+            config=run_config,
             budget=rs.budget,
             share_private=share_private,
             on_token=(emit_token if stream else None),

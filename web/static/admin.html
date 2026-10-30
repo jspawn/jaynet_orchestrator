@@ -936,12 +936,24 @@
   <section>
     <h2>Improvement proposals <button id="evRefreshProps" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Failed evals propose a WHAT/CAUSE/FIX with a classification. Nothing auto-applies —
-      accepting a prompt-tweak appends a dated bullet to the gate prompt (the git diff is
-      the review trail), accepting a bug writes a ready-to-paste issue file.
+      Failed evals propose a WHAT/CAUSE/FIX. Nothing auto-applies: new prompt, skill,
+      tool and config lessons extend the source brain's versioned overlay; bugs become issue files.
       <span class="note" id="evPropNote"></span></p>
     <table><thead><tr><th>Case</th><th>Class</th><th>What / Cause / Fix</th><th></th></tr></thead>
       <tbody id="evPropRows"></tbody></table>
+  </section>
+  <section>
+    <h2>Brain overlays <button id="evOverlayRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Accepted lessons layer onto one brain preset. Restoring a snapshot appends a new version;
+      history is never deleted. Version 0 is the empty baseline.</p>
+    <div class="row" style="margin-bottom:8px">
+      <label for="evOverlayPreset">Preset</label>
+      <select id="evOverlayPreset"></select>
+      <span class="note" id="evOverlayNote"></span>
+    </div>
+    <table><thead><tr><th>Version</th><th>Source</th><th>Created</th><th>Snapshot</th><th></th></tr></thead>
+      <tbody id="evOverlayRows"></tbody></table>
   </section>
   </div>
   </div>
@@ -1129,7 +1141,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=15"></script>
+<script src="/static/admin.js?v=16"></script>
 
 </body>
 </html>

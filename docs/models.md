@@ -63,6 +63,13 @@ Precedence is always *run overrides > preset profile > global config >
 built-in default* — an empty profile changes nothing, and edits hot-apply
 without a restart.
 
+A preset can also have a **versioned brain overlay** for accepted eval lessons:
+prompt additions, per-skill additions, tool descriptions and whitelisted
+behavioral config. Unlike the hand-edited profile, these snapshots are created
+only through Admin → Eval → Proposals, retain proposal/experiment provenance,
+and support copy-on-rollback. Resolution follows the active slot, so two presets
+sharing `local-orchestrator` never inherit each other's lessons.
+
 
 ## Quick start / CPU-small (brain, one-model installs)
 

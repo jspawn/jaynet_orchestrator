@@ -446,7 +446,12 @@ run). The **Benchmark** sub-tab runs one suite under N variants
 pass rates per label — and a variant can run **without named skills**
 (`disabled_skills`: hidden from the catalog, refused by `skill.load`), so
 "does this skill actually earn its context?" becomes an A/B with a number
-attached. `trace.*` reads the run history back
+attached. Failed cases become human-reviewed proposals. Accepting a new
+prompt/skill/tool/config lesson appends a complete snapshot to the source
+brain's overlay in `presets.db` — other presets and global artifacts stay
+untouched. Eval → Proposals shows the versions and can restore an older one
+(including empty v0) by appending a new version, never deleting history.
+`trace.*` reads the run history back
 (`trace.query`) and mines recurring tool-call sequences worth compiling
 into new tools (`trace.mine`). The meta-instruments live next to it:
 `scripts/eval-peek.py` (per-case judge notes, guard telemetry — per-guard

@@ -333,25 +333,34 @@ def _git_provenance() -> tuple[str | None, int | None]:
     return sha, dirty
 
 
-def _provenance(cfg: dict, prompt_addition: str = "") -> dict:
+def _provenance(cfg: dict, experiment: dict | None = None) -> dict:
     """The provenance columns for one result row. Every piece degrades to
     None on ANY error — a broken checkout, missing prompt file or unparsable
     preset must not lose the eval result."""
     import hashlib as _hl
 
-    from runtime import paths
+    from runtime import brain_overlays, paths
+    from runtime.preset_store import brain_overlay_for
     sha, dirty = _git_provenance()
+    model = (cfg.get("orchestrator") or {}).get("model") or "local-orchestrator"
+    overlay_meta = brain_overlay_for(cfg, model)
+    active = overlay_meta["overlay"]
     prompt_hash = None
     try:
         from runtime import gate_prompt
         content, _layer = gate_prompt.load(cfg, paths.CONFIG)
-        content += ("\n\n" + prompt_addition) if prompt_addition else ""
+        for addition in (active["prompt_addition"],
+                         (experiment or {}).get("prompt_addition") or ""):
+            content += ("\n\n" + addition) if addition else ""
         prompt_hash = _hl.sha256(content.encode("utf-8")).hexdigest()[:16]
     except Exception:
         prompt_hash = None
     try:
+        effective_cfg = brain_overlays.config_with_overlay(cfg, active)
+        effective_cfg = brain_overlays.config_with_overlay(
+            effective_cfg, brain_overlays.from_experiment(experiment))
         config_hash = _hl.sha256(
-            json.dumps(cfg, sort_keys=True, default=str)
+            json.dumps(effective_cfg, sort_keys=True, default=str)
             .encode("utf-8")).hexdigest()[:16]
     except Exception:
         config_hash = None
@@ -374,7 +383,9 @@ def _provenance(cfg: dict, prompt_addition: str = "") -> dict:
         pass
     return {"git_sha": sha, "git_dirty": dirty, "prompt_hash": prompt_hash,
             "config_hash": config_hash, "specialist_preset": specialist,
-            "model_files": model_files}
+            "model_files": model_files,
+            "overlay_version": overlay_meta["version"] or None,
+            "overlay_hash": overlay_meta["content_hash"] or None}
 
 
 def _fallbacks_since(runtime, since_ts: float,
@@ -579,9 +590,18 @@ def set_disabled_hook(fn) -> None:
     _DISABLED_HOOK = fn
 
 
-def config(cfg: dict) -> dict:
+def config(cfg: dict, experiment: dict | None = None) -> dict:
     out = dict(DEFAULTS)
-    raw = (cfg.get("eval") or {})
+    raw = dict(cfg.get("eval") or {})
+    from runtime.preset_store import brain_overlay_for
+    model = (cfg.get("orchestrator") or {}).get("model") or "local-orchestrator"
+    active = brain_overlay_for(cfg, model)["overlay"]["config"]
+    for key, value in active.items():
+        if key.startswith("eval."):
+            raw[key.split(".", 1)[1]] = value
+    candidate = (experiment or {}).get("config") or {}
+    if str(candidate.get("key") or "").startswith("eval."):
+        raw[str(candidate["key"]).split(".", 1)[1]] = candidate["value"]
     for k in out:
         if raw.get(k) is not None:
             out[k] = raw[k]
@@ -1996,12 +2016,15 @@ async def _setup_case_run(runtime, case: EvalCase,
     the skip-never-fail checks (requires_tools, container preflight).
     Returns (ctx, None) to run the case, or (None, skip_row) when a gate
     skips it."""
-    ecfg = config(runtime.config)
+    ecfg = config(runtime.config, (variant or {}).get("experiment_overlay"))
     cost_budget = (variant or {}).get("experiment_cost_budget")
     if cost_budget is not None and "cap" not in cost_budget:
         remaining = cost_budget.get("remaining")
         cost_budget["cap"] = float(
             ecfg["max_cost_usd"] if remaining is None else remaining)
+    if cost_budget is not None:
+        ecfg["max_cost_usd"] = min(float(ecfg["max_cost_usd"]),
+                                   float(cost_budget["cap"]))
     guards_off = _guards_off_of(variant)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
@@ -2197,12 +2220,9 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
         # the internal variant. Nothing here writes the live prompt, skills,
         # registry or config; sandbox patches below still win on any conflict.
         experiment = (variant or {}).get("experiment_overlay") or {}
-        if experiment.get("skill_addition"):
-            s = experiment["skill_addition"]
-            run_overrides["skill_additions"] = {s["name"]: s["content"]}
-        if experiment.get("tool_description"):
-            t = experiment["tool_description"]
-            run_overrides["tool_descriptions"] = {t["name"]: t["content"]}
+        from runtime import brain_overlays
+        run_overrides = brain_overlays.experiment_run_overrides(
+            run_overrides, experiment)
         container = None
         if case.container:
             # Start the case container over the (already seeded) work_root and
@@ -2412,13 +2432,19 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
                 | set(exp.get("must_not_use_tools") or [])
                 | _called_tools(transcript))
     experiment = (ctx.variant or {}).get("experiment_overlay") or {}
-    prompt_addition = experiment.get("prompt_addition") or ""
+    from runtime import brain_overlays
+    from runtime.preset_store import brain_overlay_for
+    model = (getattr(runtime, "model", None)
+             or (runtime.config.get("orchestrator") or {}).get("model"))
+    active = brain_overlay_for(runtime.config, model)["overlay"]
+    prompt_additions = [active["prompt_addition"],
+                        experiment.get("prompt_addition") or ""]
     system_prompt = (getattr(runtime, "system_prompt", "") or "")
-    if prompt_addition:
-        system_prompt += "\n\n" + prompt_addition
+    system_prompt += "".join("\n\n" + x for x in prompt_additions if x)
     tool_descriptions = {
         t.name: (getattr(t, "description", "") or "")
         for t in runtime.registry.all() if t.name in relevant}
+    tool_descriptions.update(active["tool_descriptions"])
     if experiment.get("tool_description"):
         t = experiment["tool_description"]
         tool_descriptions[t["name"]] = t["content"]
@@ -2426,10 +2452,16 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     skill_bodies = _loaded_skill_bodies(
         transcript, skills_dir=(runtime.config.get("skills") or {}).get("dir"),
         extra_names=extra_skills, trace_only=True)
+    for name, content in active["skill_additions"].items():
+        if name in skill_bodies:
+            skill_bodies[name] += "\n\n— Brain overlay addition —\n" + content
     if experiment.get("skill_addition"):
         s = experiment["skill_addition"]
         if s["name"] in skill_bodies:
             skill_bodies[s["name"]] += "\n\n— Experiment addition —\n" + s["content"]
+    effective_cfg = brain_overlays.config_with_overlay(runtime.config, active)
+    effective_cfg = brain_overlays.config_with_overlay(
+        effective_cfg, brain_overlays.from_experiment(experiment))
     # State block for the judge: what the agent actually had. Without it the
     # judge is guessing — a state-blind judge misdiagnosed harness toolset
     # exclusions as prompt problems (fs.write/llm.call were never exposed).
@@ -2447,10 +2479,10 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
             "case_budget": case.budget or {},
             # budgets + architect.threshold are config-proposal targets —
             # the judge must see the current values to propose sane ones.
-            "budgets": runtime.config.get("budgets") or {},
-            "loop_guard": runtime.config.get("loop_guard") or {},
+            "budgets": effective_cfg.get("budgets") or {},
+            "loop_guard": effective_cfg.get("loop_guard") or {},
             "architect.threshold":
-                (runtime.config.get("architect") or {}).get("threshold"),
+                (effective_cfg.get("architect") or {}).get("threshold"),
             "privacy.remote_llm_tools":
                 (runtime.config.get("privacy") or {})
                 .get("remote_llm_tools", []) or [],
@@ -2499,8 +2531,7 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
     fb = _fallback_fields(runtime, case_t0, ctx.fallback_tag or None)
     status, passed = _fallback_verdict(runtime, fb, status, passed, judged)
     experiment = (variant or {}).get("experiment_overlay") or {}
-    prov = _provenance(runtime.config or {},
-                       experiment.get("prompt_addition") or "")
+    prov = _provenance(runtime.config or {}, experiment=experiment)
 
     row = {"test_id": case.id, "passed": passed, "score": judged["score"],
            "judge_notes": judged["notes"], "judge_model": judged["judge_model"],
@@ -2549,6 +2580,12 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
             return row
         row = stored
         if not passed and judged["classification"] not in ("", "none", "bad-test"):
+            from runtime.preset_store import brain_overlay_for
+            model = (getattr(runtime, "model", None)
+                     or (runtime.config.get("orchestrator") or {}).get("model"))
+            overlay: dict[str, Any] = (
+                brain_overlay_for(runtime.config, model)
+                if variant is None else {"preset": "", "version": 0})
             proposal = store.add_proposal(
                 test_id=case.id, result_id=stored.get("id"),
                 classification=judged["classification"],
@@ -2556,7 +2593,10 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
                 proposed_content=judged["proposed_content"] or None,
                 what=judged["what"] or judged["notes"],
                 cause=judged["cause"] or "unclear",
-                fix=judged["fix"] or "unclear")
+                fix=judged["fix"] or "unclear",
+                brain_preset=overlay["preset"] or None,
+                base_overlay_version=(overlay["version"]
+                                      if overlay["preset"] else None))
             if proposal:
                 row["proposal_id"] = proposal["id"]
     row["check_failures"] = check_failures
@@ -2654,7 +2694,7 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     _guards_off_of(variant)      # fail a bad variant spec before spending
     _tools_only_of(runtime, variant)
     _base_system_of(variant)
-    ecfg = config(runtime.config)
+    ecfg = config(runtime.config, (variant or {}).get("experiment_overlay"))
     cap = float(ecfg["suite_max_cost_usd"])
     degraded = await _degraded_fallback_sources(runtime.config)
     if degraded:

@@ -94,6 +94,7 @@ Handoffs: `skills.md`, `chains.md`, `plugins.md`, `connectors.md` in `handoffs/`
 | `web/routes_admin.py` | `/api/admin/*` — config, presets/slots, backup, HF downloader, services. |
 | `web/routes_studio.py` | Studio authoring (skills/chains/tools/evals) + jaypack. |
 | `web/routes_eval.py` | `/api/admin/evals/*` + flag→make-test. |
+| `web/routes_brain_overlays.py` | Proposal accept plus per-brain overlay history/rollback routes. |
 | `web/auth.py` | `UserStore` (users.db), TOTP, sessions, throttling. |
 | `web/store.py` | `ChatStore`/`FlagStore`/`ReportStore` (chats.db). |
 | `web/goals.py` | Goal supervisor (multi-run `/goal` loop with judge double-check). |
@@ -110,6 +111,7 @@ Handoff: [../handoffs/web-ui.md](../handoffs/web-ui.md).
 | `runtime/eval_runner.py` | The harness: run_case/run_suite, judge, container sandboxing, expectation checkers, proposals. |
 | `runtime/eval_store.py` | eval.db — results, proposals, harness experiments, strength matrix. |
 | `runtime/harness_experiments.py` | Admin-only Propose–Probe–Compose experiments; validated run-scoped overlays and evidence. |
+| `runtime/brain_overlays.py` | Append-only per-preset snapshots, merge/config composition, idempotent accept and copy-on-rollback. |
 | `runtime/eval_stats.py` | Wilson intervals, McNemar pairing. |
 | `runtime/trace.py` | trace.db — per-step trajectory log (eval evidence source). |
 | `evals/*.yaml` | Shipped cases + judge calibration. |
@@ -133,7 +135,7 @@ Docs: [testing-harness.md](testing-harness.md).
 |---|---|
 | trace.db | `runtime/trace.py` |
 | eval.db | `runtime/eval_store.py` |
-| presets.db (presets, slots, cloud models) | `runtime/preset_store.py`, `runtime/cloud_store.py` |
+| presets.db (presets, slots, cloud models, brain overlay versions) | `runtime/preset_store.py`, `runtime/cloud_store.py`, `runtime/brain_overlays.py` |
 | chats.db (chats, flags, reports) | `web/store.py` |
 | users.db (users, sessions, goals) | `web/auth.py` |
 | Persistent agent memory (SQLite FTS5) | `tools/memory/store.py` |

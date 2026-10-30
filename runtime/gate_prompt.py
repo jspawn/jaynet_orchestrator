@@ -16,9 +16,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Section marker under which accepted eval prompt-tweak proposals collect
-# (see web/routes_eval.py's _apply_prompt_tweak). Consolidation folds them
-# back into the prose and drops the section.
+# Section marker under which legacy global eval prompt-tweak proposals collect
+# (see web/routes_eval.py's _apply_prompt_tweak). New brain-scoped lessons use
+# preset_overlay_versions instead. Consolidation folds global bullets into prose.
 PROPOSALS_MARKER = "<!-- eval-proposals -->"
 
 

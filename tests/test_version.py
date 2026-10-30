@@ -50,4 +50,4 @@ def test_admin_overview_renders_fallback_warning():
     assert 'id="fallbacks"' in html
     assert "d.model_fallbacks" in js
     assert "Model fallback detected" in js
-    assert '/static/admin.js?v=15' in html
+    assert '/static/admin.js?v=16' in html

@@ -1533,7 +1533,7 @@ function tabVisible(top,sub){
   if(top==="eval"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(top==="eval"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
   if(top==="eval"&&sub==="details") loadEvalStats();
-  if(top==="eval"&&sub==="proposals") loadEvalProposals();
+  if(top==="eval"&&sub==="proposals"){ loadEvalProposals(); loadBrainOverlays(); }
   if(top==="eval"&&sub==="experiments"){
     _evExpVisible=true;
     refreshEvalExperiments();
@@ -3324,7 +3324,9 @@ async function loadEvalProposals(){
     "<tr><td><b>"+esc(p.test_id)+"</b>"+
       "<div class='muted' style='font-size:11px'>"+new Date(p.ts*1000).toLocaleString()+"</div></td>"+
     "<td><span class='pill'>"+esc(p.classification||"?")+"</span>"+
-      (p.target?"<div class='muted' style='font-size:11px;margin-top:2px'>→ "+esc(p.target)+"</div>":"")+"</td>"+
+      (p.target?"<div class='muted' style='font-size:11px;margin-top:2px'>→ "+esc(p.target)+"</div>":"")+
+      (p.brain_preset?"<div class='muted' style='font-size:11px'>brain: "+esc(p.brain_preset)+
+        " · base v"+esc(p.base_overlay_version??0)+"</div>":"")+"</td>"+
     "<td class='muted' style='font-size:12px;white-space:pre-wrap'>"+
       "<b>what:</b> "+esc(p.what||"")+"<br><b>cause:</b> "+esc(p.cause||"")+
       "<br><b>fix:</b> "+esc(p.fix||"")+
@@ -3339,15 +3341,63 @@ async function loadEvalProposals(){
     const el=$("#evPropNote");
     if(!r.ok){ el.className="note err"; el.textContent=typeof j.detail==="string"?j.detail:"error"; return; }
     el.className=j.applied==="none"&&j.note?"note err":"note ok";
-    el.textContent="accepted — "+(j.applied==="none"?(j.note||"status only"):("applied to "+j.applied+": "+j.path));
+    el.textContent=j.applied==="none"?("not applied — "+(j.note||"status only")):
+      ("accepted — applied to "+j.applied+": "+j.path);
     loadEvalProposals();
+    if(j.applied==="brain-overlay") loadBrainOverlays();
   });
   $("#evPropRows").querySelectorAll("[data-pr]").forEach(b=>b.onclick=async()=>{
     const r=await api("/api/admin/evals/proposals/"+b.dataset.pr+"/reject",{method:"POST"});
     if(r.ok){ note($("#evPropNote"),"rejected",true); loadEvalProposals(); }
   });
 }
-$("#evRefreshProps").onclick=loadEvalProposals;
+$("#evRefreshProps").onclick=()=>{ loadEvalProposals(); loadBrainOverlays(); };
+
+// -- versioned per-brain overlays --
+let _evOverlayPreset="";
+async function loadBrainOverlays(){
+  const r=await api("/api/admin/brain-overlays");
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evOverlayNote"),studioDetail(j),false); return; }
+  const overlays=j.overlays||[], select=$("#evOverlayPreset");
+  select.innerHTML=overlays.map(o=>"<option value='"+esc(o.preset)+"'>"+
+    esc(o.preset)+" (v"+esc(o.version)+")</option>").join("");
+  if(!overlays.length){ $("#evOverlayRows").innerHTML=
+    '<tr><td colspan="5" class="muted">no brain presets</td></tr>'; return; }
+  if(!overlays.some(o=>o.preset===_evOverlayPreset))
+    _evOverlayPreset=(overlays.find(o=>o.version>0)||overlays[0]).preset;
+  select.value=_evOverlayPreset;
+  await loadBrainOverlayHistory();
+}
+async function loadBrainOverlayHistory(){
+  if(!_evOverlayPreset) return;
+  const r=await api("/api/admin/brain-overlays/"+encodeURIComponent(_evOverlayPreset));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evOverlayNote"),studioDetail(j),false); return; }
+  $("#evOverlayRows").innerHTML=(j.versions||[]).map(v=>{
+    const source=v.version===0?"empty baseline":
+      v.source_version!=null?"rollback of v"+v.source_version:
+      v.proposal_id?"proposal #"+v.proposal_id:"accepted overlay";
+    return "<tr><td><b>v"+v.version+"</b> "+(v.active?"<span class='pill'>active</span>":"")+"</td>"+
+      "<td>"+esc(source)+(v.experiment_id?"<div class='muted' style='font-size:11px'>"+
+        esc(v.experiment_id)+"</div>":"")+"</td>"+
+      "<td class='muted'>"+(v.created?new Date(v.created*1000).toLocaleString():"—")+"</td>"+
+      "<td><details><summary>inspect</summary><pre style='max-width:520px;white-space:pre-wrap'>"+
+        esc(JSON.stringify(v.overlay,null,2))+"</pre></details></td>"+
+      "<td style='text-align:right'>"+(v.active?"":"<button data-evo-rollback='"+v.version+"'>restore</button>")+"</td></tr>";
+  }).join("") || '<tr><td colspan="5" class="muted">no versions</td></tr>';
+  $("#evOverlayRows").querySelectorAll("[data-evo-rollback]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Append a new active version restoring "+_evOverlayPreset+"@v"+b.dataset.evoRollback+"?")) return;
+    const r=await api("/api/admin/brain-overlays/"+encodeURIComponent(_evOverlayPreset)+"/rollback",
+      {method:"POST",json:{version:Number(b.dataset.evoRollback)}});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ note($("#evOverlayNote"),studioDetail(j),false); return; }
+    note($("#evOverlayNote"),"restored as "+j.path,true);
+    await loadBrainOverlays();
+  });
+}
+$("#evOverlayPreset").onchange=e=>{ _evOverlayPreset=e.target.value; loadBrainOverlayHistory(); };
+$("#evOverlayRefresh").onclick=loadBrainOverlays;
 
 // -- matched harness experiments --
 let _evExperiments=[], _evExpDetail=null, _evExpId=null;
@@ -3444,8 +3494,8 @@ function renderEvalExperimentDetail(exp){
   }
   const canCreate=exp.status==="done"&&Object.keys(overlay).length>0&&!ids.length;
   if(canCreate) h+="<div class='row' style='margin:10px 0'><button class='primary' data-ev-exp-create>"+
-    "Create gated proposals</button><span class='muted' style='font-size:12px'>"+
-    "Creates pending proposals only; never accepts or applies them.</span></div>";
+    "Create gated proposal</button><span class='muted' style='font-size:12px'>"+
+    "Creates one pending brain overlay; never accepts or applies it.</span></div>";
   if(ids.length) h+="<p style='font-size:12px'><b>Gated proposal IDs:</b> "+
     ids.map(id=>"<code>"+esc(id)+"</code>").join(", ")+
     " <button data-ev-exp-proposals>Review in Proposals</button><br>"+
@@ -3567,7 +3617,7 @@ async function createEvalExperimentProposals(id){
       renderEvalExperimentDetail(_evExpDetail);
     }
     note($("#evExpNote"),"created "+ids.length+" gated proposal"+(ids.length===1?"":"s")+
-      " — review them in Proposals; nothing was applied",true);
+      " — review in Proposals; nothing was applied",true);
     await refreshEvalExperiments();
   }catch(e){ note($("#evExpNote"),"create proposals: "+e.message,false); }
   finally{ if(button&&button.isConnected) button.disabled=false; }

@@ -8,15 +8,14 @@ $JAYNET_DATA/custom/evals, layered over the repo evals/ seeds (custom wins on id
 clash; builtins are never written or deleted through here). All runtime.paths
 lookups happen AT CALL TIME so tests can point the area at tmp dirs.
 
-Nothing auto-applies: accepting a proposal is an explicit admin click, and the
-side effects (a dated bullet in the git-managed gate prompt, a ready-to-paste
-issue file) leave a review trail.
+Nothing auto-applies: accepting a proposal is an explicit admin click. New
+behavioral lessons append versioned per-brain snapshots; legacy global edits
+and ready-to-paste issue files retain their original review trail.
 """
 
 from __future__ import annotations
 
 import asyncio
-import re
 import sqlite3
 import time
 from datetime import UTC, datetime
@@ -41,6 +40,8 @@ from web.models import (
     EvalScheduleRequest,
     EvalValidateRequest,
 )
+from web.routes_brain_overlays import _clean_fix_text
+from web.routes_brain_overlays import register as register_brain_overlay_routes
 from web.routes_studio import _strip_fence
 
 # Drafts never leave the box: fixed LOCAL alias, never a request parameter.
@@ -59,23 +60,6 @@ _PROPOSALS_MARKER = gate_prompt.PROPOSALS_MARKER
 # Delta mode (skip_stable): fraction of stable cases re-included as a random
 # spot-check — a stable case that silently went bad must still surface.
 _STABLE_SAMPLE_RATE = 0.1
-
-# Judges phrase fixes as proposals to a human ("Add a directive: …",
-# "Add system-prompt instruction: …"). Strip that meta-prefix so the
-# appended bullet reads as a directive to the model. Conservative on
-# purpose: only known prefixes are stripped, anything else lands verbatim.
-_FIX_META_PREFIX = re.compile(
-    r"^\s*add\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?"
-    r"(?:system[- ]?prompt\s+)?"
-    r"(?:directive|instruction|rule|guideline|bullet|line|note)s?"
-    r"(?:\s+to\s+the\s+(?:system[- ]?prompt|prompt))?"
-    r"\s*[:\-–—]\s*",
-    re.IGNORECASE)
-
-
-def _clean_fix_text(fix: str) -> str:
-    cleaned = _FIX_META_PREFIX.sub("", fix, count=1).strip()
-    return cleaned or fix.strip()
 
 # Compact schema spec for the drafting system prompts (kept in sync with
 # runtime/eval_cases.py: validate_case_dict is the source of truth).
@@ -1146,17 +1130,14 @@ def register(app, s):
             encoding="utf-8")
         return str(f)
 
-    @app.post("/api/admin/evals/proposals/{pid}/accept")
-    async def eval_proposal_accept(pid: int):
+    def _accept_legacy(prop: dict) -> dict:
         store = _store()
         try:
-            prop = store.get_proposal(pid)
-            if prop is None:
-                raise HTTPException(status_code=404,
-                                    detail=f"no proposal #{pid}")
-            prop = store.set_proposal_status(pid, "accepted")
+            accepted = store.set_proposal_status(prop["id"], "accepted")
         finally:
             store.close()
+        assert accepted is not None
+        prop = accepted
         applied, path = "none", None
         cls = prop["classification"]
         try:
@@ -1171,11 +1152,12 @@ def register(app, s):
             elif cls == "bug-for-dev":
                 applied, path = "issue", _write_issue(prop)
         except ValueError as e:
-            # Unappliable proposal (bad target, cap reached, …): keep it
-            # accepted-but-unapplied and say why.
+            # Legacy global proposals retain their original status semantics.
             return {"proposal": prop, "applied": "none", "path": None,
                     "note": str(e)}
         return {"proposal": prop, "applied": applied, "path": path}
+
+    register_brain_overlay_routes(app, runtime, _store, _accept_legacy)
 
     @app.post("/api/admin/evals/proposals/{pid}/reject")
     async def eval_proposal_reject(pid: int):

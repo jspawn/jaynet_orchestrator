@@ -164,8 +164,8 @@ Things to play with when you try it:
   distilled procedure draft. The built-in eval harness
   runs those tests through the real agent loop, a judge turns failures into
   concrete proposals (prompt, skill, tool description or config), and one
-  admin click applies the fix to the custom layer — the next suite measures
-  the effect. Real failure → test → diagnose → fix → re-measure, without
+  admin click versions the fix into the source brain's overlay — the next
+  suite measures the effect. Real failure → test → diagnose → fix → re-measure, without
   leaving the box.
 - **Privacy is taint tracking, not a disclaimer.** Output of a private tool
   *taints* the conversation; while tainted, nothing leaves for the cloud
@@ -438,9 +438,11 @@ For the technically curious, the whole surface at a glance:
   *itself*: scripted/adaptive scenarios through the real loop, judged with
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
-  patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Eval → Cases, or `eval.run` in chat; case rows click-select
-  for the run bar, and a confirmed Run all plays the whole library).
+  appends a reversible version to the source brain's overlay (builtins stay
+  pristine); the next suite measures the effect. Admin → Eval → Proposals
+  includes snapshot history and copy-on-rollback (Admin → Eval → Cases, or
+  `eval.run` in chat; case rows click-select for the run bar, and a confirmed
+  Run all plays the whole library).
   Results leads with KPIs, the overall trend and the ledger; Result Details
   groups tool telemetry, per-case statistics and period comparison. The
   Benchmark sub-tab

@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Versioned per-brain overlays:** accepted eval lessons now target the brain
+  preset that produced the evidence instead of global prompt/skill/tool/config
+  artifacts. Complete snapshots retain proposal/experiment provenance, support
+  stale-base protection, idempotent accept and copy-on-rollback in Admin → Eval
+  → Proposals. Eval results record overlay version and hash; nothing auto-applies.
+
 ## 1.41.1 — 2026-10-29
 
 Patch release driven by the full live tool/skill self-test

@@ -1498,6 +1498,8 @@ async def test_harness_experiment_routes_and_pending_proposals(
     async def fake_experiment(runtime, case, store, experiment_id,
                               disabled_tools=None, progress=None, should_stop=None):
         exp = store.get_harness_experiment(experiment_id)
+        exp["brain_preset"] = "brain-test"
+        exp["base_overlay_version"] = 0
         def measured(passed):
             return {"test_id": case.id, "passed": passed,
                     "score": 9 if passed else 2, "status": "ok",
@@ -1543,7 +1545,8 @@ async def test_harness_experiment_routes_and_pending_proposals(
         assert r.status_code == 200
         props = r.json()["proposals"]
         assert len(props) == 1 and props[0]["status"] == "pending"
-        assert props[0]["classification"] == "prompt-tweak"
+        assert props[0]["classification"] == "brain-overlay"
+        assert props[0]["brain_preset"] == "brain-test"
         assert (await c.post(
             f"/api/admin/evals/experiments/{experiment_id}/proposals")).status_code == 409
 
@@ -1565,3 +1568,82 @@ async def test_harness_experiment_rejects_adaptive_case(evalapp, web_client):
                          json={"id": "adaptive", "reps": 1})
         assert r.status_code == 400
         assert "scripted" in r.json()["detail"]
+
+
+def _brain_catalog(app, name="brain-a"):
+    from runtime import preset_store
+    db = preset_store.db_path_for(app.state.runtime.config)
+    catalog = preset_store.PresetStore(db)
+    catalog.upsert(name, {"alias": "local-orchestrator"}, create=True)
+    catalog.set_slot("brain", name)
+    assert preset_store.load_into_config(app.state.runtime.config)
+    return db
+
+
+@pytest.mark.asyncio
+async def test_brain_proposal_accept_retry_stale_and_rollback(
+        evalapp, web_client):
+    from runtime import brain_overlays, gate_prompt
+    app, *_ = evalapp
+    db = _brain_catalog(app)
+    global_overlay = gate_prompt.overlay_path(app.state.runtime.config)
+    store = _store()
+    prop = store.add_proposal(
+        test_id="case", result_id=1, classification="prompt-tweak",
+        what="w", cause="c", fix="Ask before acting.", brain_preset="brain-a",
+        base_overlay_version=0)
+    store.close()
+    async with web_client(app) as c:
+        assert (await c.get("/api/admin/brain-overlays")).status_code == 200
+        r = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert r.status_code == 200 and r.json()["path"] == "brain-a@v1"
+        assert r.json()["proposal"]["status"] == "accepted"
+        # Retrying is idempotent even though the recorded base is now stale.
+        again = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert again.status_code == 200 and again.json()["path"] == "brain-a@v1"
+        stale = _store().add_proposal(
+            test_id="case", result_id=2, classification="prompt-tweak",
+            what="w2", cause="c2", fix="Stale lesson.", brain_preset="brain-a",
+            base_overlay_version=0)
+        conflict = await c.post(f"/api/admin/evals/proposals/{stale['id']}/accept")
+        assert conflict.status_code == 409
+        history = (await c.get("/api/admin/brain-overlays/brain-a")).json()
+        assert [v["version"] for v in history["versions"]] == [1, 0]
+        restored = await c.post("/api/admin/brain-overlays/brain-a/rollback",
+                                json={"version": 0})
+        assert restored.status_code == 200 and restored.json()["path"] == "brain-a@v2"
+    overlays = brain_overlays.BrainOverlayStore(db)
+    assert overlays.active("brain-a")["overlay"]["prompt_addition"] == ""
+    assert len(overlays.history("brain-a")) == 2
+    assert not global_overlay.exists()
+    pending = _store().get_proposal(stale["id"])
+    assert pending["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_atomic_experiment_overlay_accept(evalapp, web_client):
+    import json
+
+    from runtime import brain_overlays
+    app, *_ = evalapp
+    db = _brain_catalog(app, "brain-exp")
+    global_threshold = (app.state.runtime.config.get("architect") or {}).get("threshold")
+    content = {"schema": 1, "base_version": 0, "experiment_id": "hx-test",
+               "overlay": {"prompt_addition": "verify first",
+                           "config": {"key": "architect.threshold", "value": 2}}}
+    store = _store()
+    prop = store.add_proposal(
+        test_id="case", result_id=None, classification="brain-overlay",
+        target="brain-exp", proposed_content=json.dumps(content),
+        what="w", cause="c", fix="combined", brain_preset="brain-exp",
+        base_overlay_version=0)
+    store.close()
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert r.status_code == 200 and r.json()["path"] == "brain-exp@v1"
+    active = brain_overlays.BrainOverlayStore(db).active("brain-exp")
+    assert active["experiment_id"] == "hx-test"
+    assert active["overlay"]["prompt_addition"] == "verify first"
+    assert active["overlay"]["config"] == {"architect.threshold": 2}
+    assert (app.state.runtime.config.get("architect") or {}).get("threshold") == \
+        global_threshold

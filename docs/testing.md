@@ -52,6 +52,7 @@ Fixtures (`tests/conftest.py`):
 | `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
 | `test_ledger.py` | the acceptance ledger: check declaration syntax, checks at done-transition, the `verify` action, harness-set `verified`, open_must gate semantics, ledger.json round-trip + criterion-gated hydration, opt-in commit-on-verify with red→green baseline |
 | `test_model_profiles.py` | per-model harness profiles (§4b): profile validation + store migration + alias resolution, think-strip families, reasoning-budget override, parse_run_settings compaction/anchor/sampling layering, model-aware role_sampling |
+| `test_brain_overlays.py` | versioned per-brain overlays (§4c): append-only snapshots, idempotent accept, stale-base refusal, rollback, active-slot isolation, config precedence, brain-scoped dedup and eval provenance |
 | `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, specialist.delegate; per-run sampler merge |
 | `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |
@@ -125,8 +126,8 @@ Fixtures (`tests/conftest.py`):
 | File | What it pins |
 |---|---|
 | `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback; the deterministic grading keys (`answer_exact_any` GAIA normalization, `checker` scripts) and the container-case lifecycle (preflight skip, start/exec/stop, tools_patch routing) |
-| `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject, harness-experiment routes |
-| `test_harness_experiments.py` | Propose–Probe–Compose sequencing, repetition/cancellation, overlay validation and isolation, one validation-feedback editor retry with cumulative usage, unprobed-target refusal, pending-only proposal creation |
+| `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject, brain-overlay accept/retry/history/rollback, harness-experiment routes |
+| `test_harness_experiments.py` | Propose–Probe–Compose sequencing, repetition/cancellation, overlay validation and isolation, one validation-feedback editor retry with cumulative usage, unprobed-target refusal, atomic brain-overlay proposal creation |
 | `test_eval_stats.py` | eval.db statistics — KPIs, per-case flakiness, A/B period compare |
 | `test_gate_prompt.py` | the gate-prompt overlay — shipped vs overlay load, save, revert |
 

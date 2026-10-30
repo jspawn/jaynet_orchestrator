@@ -87,6 +87,10 @@ sync when a term changes meaning; do not duplicate prose.
 - `eval.db` — eval results + improvement proposals, long-term
   (`runtime/eval_store.py`). `brain` labels a run's model/variant;
   `benchmark=1` marks benchmark reps (excluded from default statistics).
+- `presets.db` — preset catalog/slots plus `preset_overlay_versions`: complete
+  per-brain snapshots of accepted eval lessons (`runtime/brain_overlays.py`).
+  Active-slot resolution, append-only history and copy-on-rollback; never use
+  the first preset sharing a slot alias.
 - `chats.db` (`web/store.py`) — chats, flags, coroner reports, schedule run
   history (`schedule_runs`).
 - `schedules.json` (`runtime/scheduler.py`) — prompt schedules (one-shot /
@@ -103,8 +107,9 @@ sync when a term changes meaning; do not duplicate prose.
   builtins stay pristine.
 - **Gate prompt** — the system prompt. Shipped at
   `prompts/orchestrator-gate.md`; a live overlay shadows it at
-  `$JAYNET_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Accepted eval
-  proposals append dated bullets under `<!-- eval-proposals -->`.
+  `$JAYNET_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Legacy global
+  proposals append dated bullets under `<!-- eval-proposals -->`; new
+  brain-scoped proposals use `preset_overlay_versions` instead.
 - **Dispatch prompt** — the lean variant (`orchestrator.dispatch_prompt`,
   shipped `prompts/orchestrator-dispatch.md`) used INSTEAD of the gate
   prompt when `tools.code.brain_mode: dispatch` (the dispatch gate rejects

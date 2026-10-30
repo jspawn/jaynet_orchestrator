@@ -177,18 +177,24 @@ class EvalStore:
                              ("config_hash", "TEXT"),
                              ("specialist_preset", "TEXT"),
                              ("model_files", "TEXT"),
-                             ("cache_hit_ratio", "REAL")):
+                             ("cache_hit_ratio", "REAL"),
+                             ("overlay_version", "INTEGER"),
+                             ("overlay_hash", "TEXT")):
                 if col not in cols:
                     self._conn.execute(
                         f"ALTER TABLE results ADD COLUMN {col} {ddl}")
             # Migration: structured apply-targets for proposals (the judge
-            # names WHAT to change and the replacement content).
+            # names WHAT to change and the replacement content), plus the
+            # brain/overlay evidence that scoped proposals apply to.
             pcols = [r["name"] for r in
                      self._conn.execute("PRAGMA table_info(proposals)")]
-            for col in ("target", "proposed_content"):
+            for col, ddl in (("target", "TEXT"),
+                             ("proposed_content", "TEXT"),
+                             ("brain_preset", "TEXT"),
+                             ("base_overlay_version", "INTEGER")):
                 if col not in pcols:
                     self._conn.execute(
-                        f"ALTER TABLE proposals ADD COLUMN {col} TEXT")
+                        f"ALTER TABLE proposals ADD COLUMN {col} {ddl}")
 
     def close(self) -> None:
         with self._lock:
@@ -209,7 +215,9 @@ class EvalStore:
                       config_hash: str | None = None,
                       specialist_preset: str | None = None,
                       model_files: str | list | None = None,
-                      cache_hit_ratio: float | None = None) -> dict:
+                      cache_hit_ratio: float | None = None,
+                      overlay_version: int | None = None,
+                      overlay_hash: str | None = None) -> dict:
         import runtime
         blob = json.dumps(transcript)[:_TRANSCRIPT_CAP]
         if isinstance(model_files, (list, tuple)):
@@ -220,15 +228,15 @@ class EvalStore:
                 " judge_model, cost_usd, tokens, elapsed_s, status, run_ids,"
                 " transcript, brain, benchmark, version, fallback, git_sha,"
                 " git_dirty, prompt_hash, config_hash, specialist_preset,"
-                " model_files, cache_hit_ratio)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " model_files, cache_hit_ratio, overlay_version, overlay_hash)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (test_id, time.time(), int(passed), score, judge_notes,
                  judge_model, round(cost_usd, 6), int(tokens),
                  round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain,
                  int(benchmark), runtime.__version__, fallback, git_sha,
                  (None if git_dirty is None else int(bool(git_dirty))),
                  prompt_hash, config_hash, specialist_preset, model_files,
-                 cache_hit_ratio))
+                 cache_hit_ratio, overlay_version, overlay_hash))
             row = self._conn.execute("SELECT * FROM results WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)
@@ -539,34 +547,43 @@ class EvalStore:
                 for (s, b), v in sorted(cells.items())]
 
     @staticmethod
-    def _dedup_key(classification: str, cause: str, fix: str) -> str:
+    def _dedup_key(classification: str, cause: str, fix: str,
+                   brain_preset: str | None = None) -> str:
         norm = "|".join(s.strip().lower() for s in (classification, cause, fix))
+        # Legacy global keys stay stable across the schema upgrade.
+        if brain_preset:
+            norm += "|" + brain_preset.strip().lower()
         return hashlib.sha1(norm.encode("utf-8")).hexdigest()
 
     def add_proposal(self, *, test_id: str, result_id: int | None,
                      classification: str, what: str, cause: str,
                      fix: str, target: str | None = None,
-                     proposed_content: str | None = None) -> dict | None:
+                     proposed_content: str | None = None,
+                     brain_preset: str | None = None,
+                     base_overlay_version: int | None = None) -> dict | None:
         """Insert a proposal. On a duplicate dedup key (same cause+fix): a
         still-pending proposal gets its structured payload refreshed — a
         re-run may have produced a better target/replacement (audit A1);
         accepted/rejected proposals stay frozen and the insert is dropped
         (None)."""
-        key = self._dedup_key(classification, cause, fix)
+        key = self._dedup_key(classification, cause, fix, brain_preset)
         with self._lock, self._conn:
             try:
                 cur = self._conn.execute(
                     "INSERT INTO proposals (test_id, result_id, ts,"
                     " classification, target, proposed_content,"
-                    " what, cause, fix, dedup_key)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    " what, cause, fix, dedup_key, brain_preset,"
+                    " base_overlay_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (test_id, result_id, time.time(), classification,
-                     target, proposed_content, what, cause, fix, key))
+                     target, proposed_content, what, cause, fix, key,
+                     brain_preset, base_overlay_version))
             except sqlite3.IntegrityError:
                 cur = self._conn.execute(
-                    "UPDATE proposals SET target=?, proposed_content=?, ts=?"
+                    "UPDATE proposals SET target=?, proposed_content=?, ts=?,"
+                    " brain_preset=?, base_overlay_version=?"
                     " WHERE dedup_key=? AND status='pending'",
-                    (target, proposed_content, time.time(), key))
+                    (target, proposed_content, time.time(), brain_preset,
+                     base_overlay_version, key))
                 if not cur.rowcount:
                     return None
                 row = self._conn.execute(
@@ -575,15 +592,14 @@ class EvalStore:
                 return dict(row)
             row = self._conn.execute("SELECT * FROM proposals WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
-            # One open item per (case, class): the judge paraphrases across
-            # runs, so exact-key dedup alone let near-identical proposals
-            # pile up (six "strengthen the delegation directive" rows for
-            # one case). The fresh row carries the latest evidence — drop
-            # older still-pending siblings.
+            # One open item per (case, class, brain): the judge paraphrases
+            # across runs, so exact-key dedup alone lets near-identical advice
+            # pile up. Different brains keep independent pending lessons.
             self._conn.execute(
                 "DELETE FROM proposals WHERE test_id=? AND classification=?"
+                " AND COALESCE(brain_preset,'')=COALESCE(?,'')"
                 " AND status='pending' AND id<>?",
-                (test_id, classification, cur.lastrowid))
+                (test_id, classification, brain_preset, cur.lastrowid))
         return dict(row)
 
     def proposals(self, status: str | None = None, limit: int = 100) -> list[dict]:

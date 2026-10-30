@@ -41,8 +41,12 @@ class _Registry:
 
 class _Runtime:
     def __init__(self):
+        self.model = "local-orchestrator"
         self.config = {"eval": {}, "privacy": {}, "costs": {},
-                       "architect": {"threshold": 3}}
+                       "architect": {"threshold": 3},
+                       "orchestrator": {"model": self.model},
+                       "models": {"slots": {"brain": "brain-x"},
+                                  "presets": {"brain-x": {"alias": self.model}}}}
         self.registry = _Registry()
         self.skills = {"coding": {"description": "write software"}}
         self.system_prompt = "BASE PROMPT"
@@ -75,7 +79,10 @@ def test_validate_overlay_and_runtime_view_is_isolated():
     overlay = hx.validate_overlay(_overlay(), rt, allow_empty=False)
     view = hx.runtime_view(rt, overlay)
     assert view is not rt and view.config is not rt.config
-    assert view.config["architect"]["threshold"] == 2
+    assert view.config["architect"]["threshold"] == 3
+    effective = hx.brain_overlays.config_with_overlay(
+        view.config, hx.brain_overlays.from_experiment(overlay))
+    assert effective["architect"]["threshold"] == 2
     assert rt.config == original
     view._served_model_log.append({"requested": "a", "served": "b"})
     assert not hasattr(rt, "_served_model_log")
@@ -119,7 +126,13 @@ def test_loop_applies_tool_description_to_model_schema_only():
     rt.config = {"orchestrator": {"model": "local-orchestrator"},
                  "budgets": {"max_iterations": 2, "max_wall_clock_s": 60,
                              "max_cost_usd": 1, "max_total_tokens": 10000},
-                 "privacy": {}}
+                 "privacy": {},
+                 "models": {"slots": {"brain": "brain-x"}, "presets": {
+                     "brain-x": {"alias": "local-orchestrator",
+                                 "overlay": {
+                                     "prompt_addition": "ACTIVE",
+                                     "tool_descriptions": {"web.search": "ACTIVE"},
+                                 }}}}}
     rt.registry = LoopRegistry()
     rt.selector = ToolSelector(rt.registry, rt.config)
     rt.trace = Trace()
@@ -132,15 +145,17 @@ def test_loop_applies_tool_description_to_model_schema_only():
     seen = []
 
     async def fake_turn(messages, tools_schema, **kwargs):
-        seen.append(tools_schema)
+        seen.append({"messages": messages, "tools": tools_schema})
         return {"message": {"role": "assistant", "content": "done"}, "usage": {}}
 
     rt._model_turn = fake_turn
     result = run(rt.run(
-        "hello", tools=["web.search"],
+        "hello", tools=["web.search"], extra_system="CANDIDATE",
         run_overrides={"tool_descriptions": {"web.search": "NEW"}}))
     assert result["status"] == "ok"
-    assert seen[0][0]["function"]["description"] == "NEW"
+    assert seen[0]["tools"][0]["function"]["description"] == "NEW"
+    prompt = seen[0]["messages"][0]["content"]
+    assert "ACTIVE\n\nCANDIDATE" in prompt
     assert rt.registry.tool.description == "original"
 
 
@@ -165,6 +180,8 @@ def test_skill_load_appends_only_the_run_scoped_addition(tmp_path, monkeypatch):
 
 def test_run_case_overlay_reaches_run_and_judge(tmp_path, monkeypatch):
     rt = _Runtime()
+    rt.config["models"]["presets"]["brain-x"]["overlay"] = {
+        "prompt_addition": "ACTIVE"}
     seen = {}
 
     async def judge(cfg, ecfg, case, transcript, failures, state):
@@ -186,7 +203,7 @@ def test_run_case_overlay_reaches_run_and_judge(tmp_path, monkeypatch):
     assert kwargs["extra_system"] == "CANDIDATE"
     assert kwargs["run_overrides"]["tool_descriptions"] == {
         "web.search": "REPLACEMENT"}
-    assert seen["state"]["system_prompt"].endswith("CANDIDATE")
+    assert seen["state"]["system_prompt"].endswith("ACTIVE\n\nCANDIDATE")
     assert seen["state"]["tool_descriptions"]["web.search"] == "REPLACEMENT"
     assert rt.system_prompt == "BASE PROMPT"
     assert rt.registry.tool.description == "original"
@@ -252,10 +269,14 @@ def test_full_experiment_and_gated_proposals(tmp_path, monkeypatch):
     assert rt.config == original_config
 
     proposals = hx.create_proposals(store, exp["id"])
-    assert {p["classification"] for p in proposals} == {
-        "prompt-tweak", "tool-description"}
+    assert [p["classification"] for p in proposals] == ["brain-overlay"]
+    assert proposals[0]["brain_preset"] == "brain-x"
+    assert proposals[0]["base_overlay_version"] == 0
+    payload = json.loads(proposals[0]["proposed_content"])
+    assert payload["overlay"]["prompt_addition"] == "verify before final"
+    assert payload["overlay"]["tool_description"]["name"] == "web.search"
     assert all(p["status"] == "pending" for p in proposals)
-    assert len(store.get_harness_experiment(exp["id"])["proposal_ids"]) == 2
+    assert len(store.get_harness_experiment(exp["id"])["proposal_ids"]) == 1
     with pytest.raises(ValueError, match="already created"):
         hx.create_proposals(store, exp["id"])
     store.close()

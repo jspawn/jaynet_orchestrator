@@ -190,9 +190,10 @@ Two sections:
 ### Prompts
 
 View and edit the active gate prompt ("edit source"); an edit applies to the
-next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a live
-edit (here, or an accepted eval prompt-tweak) writes an **overlay** in the
-data dir that wins while present, so a deploy never conflicts with it. The
+next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a direct
+edit here (or a legacy global prompt proposal) writes an **overlay** in the
+data dir that wins while present, so a deploy never conflicts with it. New
+brain-scoped eval lessons instead use Eval → Proposals → Brain overlays. The
 subtab shows which layer is active and offers **Revert to shipped**.
 **Stale-overlay warning:** the overlay silently shadows shipped prompt
 changes — if a deploy pulled a newer shipped file after the overlay was
@@ -205,8 +206,9 @@ With `tools.code.brain_mode: dispatch` the brain runs a leaner prompt
 only; the harness rejects inline code authoring anyway). The same overlay
 convention applies: `$JAYNET_DATA/custom/orchestrator-dispatch.md` wins while
 present.
-Accepted eval tweaks collect as dated bullets at the end of the prompt
-(capped at 5). When any are present, **Consolidate eval tweaks** drafts a
+Legacy global eval tweaks collect as dated bullets at the end of the prompt
+(capped at 5); new brain-scoped lessons use the version history in Eval →
+Proposals instead. When global bullets are present, **Consolidate eval tweaks** drafts a
 merged prompt with the eval judge model — the bullets folded into the
 prose — for review in the source editor; **Apply consolidation** saves it
 and writes a timestamped backup next to the overlay (the rollback path,
@@ -453,20 +455,24 @@ windows per case with pass-rate and score deltas.
 ### Proposals
 
 The gated improvement inbox. A failed case produces a **proposal**
-(WHAT/CAUSE/FIX, classified
-prompt-tweak / skill-tweak / tool-description / config / bad-test /
-bug-for-dev, with a structured `target` + `proposed_content` where the
-fix needs precision) in the inbox — nothing auto-applies. Accept applies to
-the **custom layer only**, so builtins stay pristine and deploys never
-conflict: a prompt-tweak extends the gate-prompt **overlay** (see Harness →
-Prompts), a skill-tweak appends to the skill's custom-layer copy (copying
-the builtin skill down first), a tool-description replaces the description via
-`custom/tool-overrides.yaml` (live + on boot; manage and prune them in Harness → Tools → Description overrides — deletion restores the shipped text immediately), a config proposal sets a
-whitelisted behavioural knob through the normal config-override path, and
-bug-for-dev writes a ready-to-paste issue. Repeats are deduplicated, and
-each artifact caps at 5 accepted tweaks — then consolidate the bullets into
-the prose before accepting more. Cases
-export/import as `.jaypack` via Studio. From chat, the agent can self-test
+(WHAT/CAUSE/FIX, classified prompt-tweak / skill-tweak / tool-description /
+config / bad-test / bug-for-dev) with the brain preset and overlay version that
+produced the evidence. Nothing auto-applies. Accepting a new prompt, skill, tool
+or config lesson appends a complete snapshot to that brain's **versioned
+overlay** in `presets.db`; the shared gate prompt, global skill/tool overrides
+and other brain presets stay unchanged. Overlays hot-apply, and explicit run or
+experiment overrides still win. Stale proposals are refused rather than
+overwriting a newer version. Bug-for-dev writes a ready-to-paste issue;
+reflection and legacy proposals without a brain identity keep the old global
+custom-layer behavior.
+
+**Brain overlays** below the inbox shows every snapshot and its proposal or
+experiment provenance. **Restore** copies any older snapshot — including version
+0, the empty baseline — into a new active version; history is never deleted.
+Each prompt/skill addition caps at 5 accepted bullets before consolidation.
+Eval result rows record the active overlay version and content hash for exact
+before/after comparisons. Cases export/import as `.jaypack` via Studio. From
+chat, the agent can self-test
 with `eval.run` / `eval.list` / `eval.report` — a nightly suite is just a
 scheduled prompt (`schedule.add` → "run eval tag nightly"). Flagged sessions
 can be turned into new cases with **make test** in Flagged Chats; the flag
@@ -501,9 +507,9 @@ Malformed or invalid editor output gets one correction attempt with the exact
 validation error; a second failure aborts, and every attempt stays billed.
 Artifact drift or an unmeasured arm also aborts the experiment instead of producing
 unsupported advice. One rep is exploratory; use three before treating an
-outcome as confirmed—matched runs still vary. **Create gated proposals** sends
-the composed edits to the ordinary Proposals inbox only when every arm has
-valid measured evidence; nothing applies without the usual admin accept.
+outcome as confirmed—matched runs still vary. **Create gated proposal** sends
+one atomic brain-overlay proposal to the ordinary inbox only when every arm has
+valid measured evidence; accepting it versions the whole composed edit together.
 Adaptive-driver cases are not supported because independent follow-up
 generation would break the matched condition.
 

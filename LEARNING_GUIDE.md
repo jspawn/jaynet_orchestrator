@@ -416,7 +416,8 @@ or stuck session becomes a regression *case* with one click; a suite run
 replays cases through the real agent loop — not a mock — against the live
 harness; a judge model turns failures into concrete *proposals* (prompt
 edits, skill rewrites, tool-description fixes, config changes) that a
-human applies or dismisses; the next suite run measures the effect.
+human applies or dismisses; acceptance appends a reversible snapshot to the
+source brain's overlay, and the next suite measures the effect.
 Statistics track pass rates, flakiness and trends; the benchmark tab
 shoots candidate models against each other on the same suite before you
 swap brains. In the Cases tab, rows click-select for the run bar and a
@@ -728,8 +729,10 @@ baseline, an invariant candidate (general agent discipline), a domain-specific
 candidate, and a composed overlay. Prompt, skill, tool-description and selected
 config changes exist only for those runs; live artifacts and the ordinary
 results ledger stay untouched. The composer may reuse only targets it actually
-probed, and only an explicit admin action turns the result into a pending
-proposal. One rep explores; three are the minimum before believing a delta.
+probed, and only an explicit admin action turns the result into one atomic
+brain-overlay proposal. Acceptance versions the whole composed edit together;
+rollback appends an older snapshot rather than deleting history. One rep
+explores; three are the minimum before believing a delta.
 
 The model-written overlay is structured output, so it gets the same treatment
 as a tool call (§1.2): parse it, validate its targets, and reject anything
@@ -972,6 +975,7 @@ When you want to go deeper:
 | Fallback judge | grades a run when the primary judge returns unparseable content; the note is tagged — a single fallback-graded note is a lead, not a fact |
 | Rationalization table | skill pattern: under a chronically skipped step, quote the agent's excuse first-person and attach the rebuttal — only excuses seen in real traces |
 | Harness experiment | matched baseline/candidate arms with run-scoped overlays; evidence first, proposals only by explicit admin action |
+| Brain overlay | append-only per-preset snapshots of accepted lessons; active-slot scoped, hot-applied, reversible without deleting history |
 | Caveman Compression | scoped generation-time compact style for internal reasoning and handoffs; exact artifacts and user-facing prose are never post-processed |
 
 ---

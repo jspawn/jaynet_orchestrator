@@ -55,7 +55,7 @@ import time
 from pathlib import Path
 
 try:
-    from runtime import paths
+    from runtime import brain_overlays, paths
     from runtime.env import env as _env
     DEFAULT_DB = str(paths.DATA / "presets.db")
     HOME = paths.HOME
@@ -64,6 +64,7 @@ except ImportError:
     # start-model.sh executes this file as a standalone script (no package
     # context — but the script's own dir is sys.path[0], so the sibling
     # env.py imports); the env file is sourced there, so JAYNET_DATA is set.
+    import brain_overlays  # type: ignore[no-redef]
     from env import env as _env  # type: ignore[no-redef]
     HOME = Path(_env("ORCH_HOME", "/srv/orchestrator"))
     DATA = Path(_env("ORCH_DATA", str(HOME / "data")))
@@ -329,6 +330,33 @@ SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("vision", "local-vision"))
 
 
+def brain_overlay_for(config: dict, alias: str | None) -> dict:
+    """Active overlay metadata for the preset serving `alias`.
+
+    Slot aliases resolve through the active slot, so retired presets sharing
+    `local-orchestrator` cannot donate their overlay to the current brain.
+    """
+    empty = {"preset": "", "version": 0, "content_hash": "",
+             "overlay": brain_overlays.empty_overlay()}
+    if not alias:
+        return empty
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
+    if slot:
+        name = slot_preset_name(config, slot)
+        preset = presets.get(name) or {}
+    else:
+        matches = [(n, p) for n, p in presets.items()
+                   if isinstance(p, dict) and p.get("alias") == alias]
+        name, preset = matches[0] if len(matches) == 1 else ("", {})
+    if not name:
+        return empty
+    return {"preset": name,
+            "version": int(preset.get("overlay_version") or 0),
+            "content_hash": str(preset.get("overlay_hash") or ""),
+            "overlay": brain_overlays.clean_overlay(preset.get("overlay") or {})}
+
+
 def context_for_alias(config: dict, alias: str | None) -> int:
     """CTX_SIZE of the preset serving `alias`, or 0 when unknown.
 
@@ -425,6 +453,7 @@ class PresetStore:
                             "PRAGMA synchronous=NORMAL;\n"
                             "PRAGMA busy_timeout=10000;")
             c.executescript(_SCHEMA)
+            c.executescript(brain_overlays.SCHEMA)
             # migration: DBs from before the binary field
             cols = {r[1] for r in c.execute("PRAGMA table_info(presets)")}
             if "binary" not in cols:
@@ -607,7 +636,23 @@ class PresetStore:
             rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
             slots = {r["slot"]: r["preset"]
                      for r in c.execute("SELECT * FROM slots ORDER BY rowid")}
-        return {r["name"]: self._row_to_cfg(r) for r in rows}, slots
+            overlay_rows = c.execute(
+                "SELECT preset,version,payload,content_hash "
+                "FROM preset_overlay_versions WHERE active=1").fetchall()
+        overlays = {r["preset"]: r for r in overlay_rows}
+        out = {}
+        for row in rows:
+            cfg = self._row_to_cfg(row)
+            overlay = overlays.get(row["name"])
+            if overlay:
+                cfg.update({
+                    "overlay": brain_overlays.clean_overlay(
+                        json.loads(overlay["payload"])),
+                    "overlay_version": overlay["version"],
+                    "overlay_hash": overlay["content_hash"],
+                })
+            out[row["name"]] = cfg
+        return out, slots
 
     def get(self, name: str) -> dict | None:
         """Full row incl. conf text (admin editor view)."""

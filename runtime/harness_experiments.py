@@ -19,17 +19,11 @@ import time
 import uuid
 from typing import Any
 
-from runtime import eval_runner
+from runtime import brain_overlays, eval_runner
 
 log = logging.getLogger(__name__)
 
-CONFIG_WHITELIST = frozenset({
-    "budgets.max_iterations", "budgets.max_wall_clock_s",
-    "budgets.max_cost_usd", "budgets.max_total_tokens",
-    "loop_guard.max_rejections", "architect.threshold",
-    "eval.max_cost_usd", "eval.suite_max_cost_usd",
-    "eval.adaptive_max_turns",
-})
+CONFIG_WHITELIST = brain_overlays.CONFIG_WHITELIST
 # run_case overwrites budgets.*, reads the suite cap from the unoverlaid live
 # runtime, and experiments accept scripted cases only. These are the config
 # edits that can therefore change a matched experiment's behavior.
@@ -145,14 +139,6 @@ def validate_candidate(raw: Any, runtime, *, allow_empty: bool = False) -> dict:
     return {"rationale": rationale, "overlay": overlay}
 
 
-def _set_dot(config: dict, key: str, value: Any) -> None:
-    parts = key.split(".")
-    target = config
-    for part in parts[:-1]:
-        target = target.setdefault(part, {})
-    target[parts[-1]] = value
-
-
 def _get_dot(config: dict, key: str) -> Any:
     target: Any = config
     for part in key.split("."):
@@ -163,12 +149,13 @@ def _get_dot(config: dict, key: str) -> Any:
 
 
 def runtime_view(runtime, overlay: dict):
-    """A shallow runtime view with isolated config and fallback telemetry."""
+    """A shallow runtime view with isolated config and fallback telemetry.
+
+    Config edits are applied explicitly by the eval/run composition layer so
+    the persistent brain overlay cannot overwrite the candidate being tested.
+    """
     view = copy.copy(runtime)
     view.config = copy.deepcopy(runtime.config)
-    if overlay.get("config"):
-        c = overlay["config"]
-        _set_dot(view.config, c["key"], c["value"])
     # Model-client fallback entries append to this list. Give each arm its own
     # list so parallel chats and earlier arms cannot contaminate its verdict.
     view._served_model_log = []
@@ -183,6 +170,8 @@ def new_experiment(case, reps: int) -> dict:
         "case": {"name": case.name, "tags": list(case.tags),
                  "driver": case.driver},
         "reps": reps,
+        "brain_preset": "",
+        "base_overlay_version": 0,
         "status": "running",
         "stage": "baseline",
         "created": now,
@@ -352,16 +341,26 @@ def _digest_runs(runs: list[dict]) -> str:
 def _artifact_snapshot(runtime, baseline_runs: list[dict]) -> str:
     called = {tool for row in baseline_runs for turn in row.get("transcript") or []
               for tool in turn.get("tools") or []}
+    from runtime.preset_store import brain_overlay_for
+    model = (getattr(runtime, "model", None)
+             or (runtime.config.get("orchestrator") or {}).get("model"))
+    overlay = brain_overlay_for(runtime.config, model)
+    active = overlay["overlay"]
+    effective = brain_overlays.config_with_overlay(runtime.config, active)
     descriptions = {}
     for tool in runtime.registry.all():
         if tool.name in called:
             descriptions[tool.name] = tool.description
+    descriptions.update(active["tool_descriptions"])
     skills = [{"name": name, "description": str(s.get("description") or "")[:300]}
               for name, s in sorted((getattr(runtime, "skills", None) or {}).items())]
-    config = {key: _get_dot(runtime.config, key)
+    config = {key: _get_dot(effective, key)
               for key in sorted(EXPERIMENT_CONFIG_WHITELIST)}
     return json.dumps({
-        "system_prompt": str(getattr(runtime, "system_prompt", "") or "")[:14000],
+        "system_prompt": (str(getattr(runtime, "system_prompt", "") or "")
+                          + ("\n\n" + active["prompt_addition"]
+                             if active["prompt_addition"] else ""))[:14000],
+        "brain_overlay": overlay,
         "skills": skills,
         "relevant_tool_descriptions": descriptions,
         "all_tool_names": sorted(t.name for t in runtime.registry.all()),
@@ -584,9 +583,8 @@ async def _run_arm(runtime, case, store, exp: dict, arm: dict,
         if progress:
             progress(exp["stage"])
         view = runtime_view(runtime, overlay)
-        case_cap = min(float(eval_runner.config(view.config)["max_cost_usd"]),
-                       remaining)
-        view.config.setdefault("eval", {})["max_cost_usd"] = case_cap
+        case_cap = min(float(eval_runner.config(
+            view.config, experiment=overlay)["max_cost_usd"]), remaining)
         cost_budget = {"cap": case_cap, "remaining": case_cap}
         row = await eval_runner.run_case(
             view, case, store, disabled_tools=disabled_tools, record=False,
@@ -623,6 +621,12 @@ async def run_experiment(runtime, case, store, experiment_id: str,
     if exp is None:
         raise ValueError(f"no harness experiment '{experiment_id}'")
     try:
+        from runtime.preset_store import brain_overlay_for
+        model = (getattr(runtime, "model", None)
+                 or (runtime.config.get("orchestrator") or {}).get("model"))
+        overlay = brain_overlay_for(runtime.config, model)
+        exp["brain_preset"] = overlay["preset"] or eval_runner.brain_label(runtime)
+        exp["base_overlay_version"] = overlay["version"]
         exp["baseline_fingerprint"] = _artifact_fingerprint(runtime)
         _save(store, exp)
         await _run_arm(runtime, case, store, exp, exp["baseline"], "baseline",
@@ -696,33 +700,22 @@ def create_proposals(store, experiment_id: str) -> list[dict]:
     overlay = (exp.get("composed") or {}).get("overlay") or {}
     if not overlay:
         raise ValueError("the composer kept the baseline; there is nothing to propose")
+    brain = str(exp.get("brain_preset") or "")
+    if not brain:
+        raise ValueError("experiment has no brain identity; rerun it before proposing")
+    base_version = int(exp.get("base_overlay_version") or 0)
     cause = str(exp["composed"].get("rationale") or "matched experiment evidence")
     what = f"Harness experiment {experiment_id} for {exp['case_id']}"
-    created: list[dict] = []
-    if overlay.get("prompt_addition"):
-        created.append(store.add_proposal(
-            test_id=exp["case_id"], result_id=None, classification="prompt-tweak",
-            target=None, proposed_content=None, what=what, cause=cause,
-            fix=overlay["prompt_addition"]))
-    for key, classification in (("skill_addition", "skill-tweak"),
-                                ("tool_description", "tool-description")):
-        edit = overlay.get(key)
-        if not edit:
-            continue
-        created.append(store.add_proposal(
-            test_id=exp["case_id"], result_id=None, classification=classification,
-            target=edit["name"],
-            proposed_content=edit["content"] if key == "tool_description" else None,
-            what=what, cause=cause, fix=edit["content"]))
-    if overlay.get("config"):
-        edit = overlay["config"]
-        created.append(store.add_proposal(
-            test_id=exp["case_id"], result_id=None, classification="config",
-            target=edit["key"], proposed_content=json.dumps(edit["value"]),
-            what=what, cause=cause,
-            fix=f"Set {edit['key']} to {edit['value']!r}"))
-    ids = [p["id"] for p in created if p]
+    content = {"schema": 1, "base_version": base_version,
+               "experiment_id": experiment_id, "overlay": overlay}
+    proposal = store.add_proposal(
+        test_id=exp["case_id"], result_id=None, classification="brain-overlay",
+        target=brain, proposed_content=json.dumps(content, ensure_ascii=False),
+        what=what, cause=cause,
+        fix=json.dumps(overlay, ensure_ascii=False), brain_preset=brain,
+        base_overlay_version=base_version)
+    ids = [proposal["id"]] if proposal else []
     exp["proposal_ids"] = ids
     _save(store, exp)
-    proposals = [store.get_proposal(pid) for pid in ids]
-    return [p for p in proposals if p]
+    stored = store.get_proposal(ids[0]) if ids else None
+    return [stored] if stored else []

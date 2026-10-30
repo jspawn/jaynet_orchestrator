@@ -129,6 +129,19 @@ run overrides > preset profile > global config > built-in default.
 Think-switch eligibility was already per-preset (`caps.thinking`/`backend`).
 Tests: `tests/test_model_profiles.py`.
 
+**4c — versioned brain overlays: IMPLEMENTED.** Accepted eval lessons now form
+complete per-preset snapshots in `presets.db`, rather than mutating the shared
+prompt/skill/tool/config artifacts. Prompt and named skill additions accumulate;
+tool descriptions and whitelisted config replace their exact targets. Every
+accept checks the proposal's base version and appends an active snapshot with
+proposal/experiment provenance; rollback appends a copy, including the empty
+version-0 baseline. Resolution is alias → active slot → preset, and precedence
+is explicit run/experiment override > brain overlay > global config. Eval rows
+record overlay version/hash. This deliberately revises the earlier rejection of
+prompt-per-model versioning: shared gate doctrine stays global, while small,
+reviewed behavioral lessons become transferable, reversible preset adapters.
+Tests: `tests/test_brain_overlays.py` and the brain-scoped route cases.
+
 ## Sequence
 
 | # | Item | Effort | Depends on |
@@ -137,4 +150,5 @@ Tests: `tests/test_model_profiles.py`.
 | 4a | Cache telemetry | done | — |
 | 3 | Acceptance ledger | done | — |
 | 4b | Model profiles | done | 4a |
+| 4c | Versioned brain overlays | done | 4b |
 | 2 | Protocol v1 (typed events → /v1 → threads) | stages 1–2 done; stage 3 (threads) not before Android grows | before Android grows |
