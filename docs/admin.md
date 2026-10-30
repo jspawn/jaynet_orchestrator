@@ -480,6 +480,8 @@ dialog's "include private context" checkbox (default off) controls whether
 message text may feed that draft, and the draft is written by a local model
 only — flagged content never leaves the box.
 
+![Admin → Eval → Proposals: gated suggestions and versioned brain overlays](../screenshots/admin-eval-proposals.png)
+
 The inbox is also fed from **live chat**: the reflect path
 (`runtime/reflect.py`, config `reflect.*`) watches finished successful runs
 for explicit user corrections ("no, use uv instead of pip", "never delete
