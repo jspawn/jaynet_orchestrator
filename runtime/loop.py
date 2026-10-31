@@ -887,6 +887,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                {"name": _tg.name, "phase": "post_tool",
                                 "turn": rs.budget.iterations})
 
+            # Preserve direct vision evidence outside the compactable
+            # transcript for a later auto-delegation hand-off.
+            if (name == "llm.call" and result.status == "ok"
+                    and isinstance(args, dict) and args.get("images")
+                    and isinstance(result.result, str) and result.result.strip()):
+                rs.vision_handoff = result.result.strip()
+
             # Append result to conversation
             msg_idx = len(rs.messages)
             rs.messages.append({

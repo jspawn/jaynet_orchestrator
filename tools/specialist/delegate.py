@@ -96,7 +96,7 @@ _DEFAULT_CODING_TOOLS = [
     "lint.run", "test.run",
     "git.status", "git.diff", "git.log", "git.show", "git.add", "git.commit",
     "git.branch", "git.stash", "git.restore", "git.worktree",
-    "skill.load", "skill.list", "note.set", "context.pin",
+    "skill.load", "skill.list", "note.set", "context.pin", "llm.call",
 ]
 
 # Research children need the web lane, not the git lane. Live evidence: a
@@ -457,7 +457,7 @@ class SpecialistDelegate(Tool):
                 "type": "array", "items": {"type": "string"},
                 "description": "Override the tool-set given to the child. The "
                                "default follows the strength: coding gets "
-                               "fs/code/git/lint/test, research gets the web "
+                               "fs/code/git/lint/test + llm.call, research gets the web "
                                "lane (web.search/fetch/request/render, "
                                "browser.pdf, rag.search) + fs + code.run, "
                                "security/multi-step/allround get coding + web "

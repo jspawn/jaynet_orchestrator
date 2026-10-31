@@ -4307,6 +4307,35 @@ def test_auto_delegate_fires_on_refusal_streak(monkeypatch):
         "repeat refusals use the minimal string"
 
 
+def test_auto_delegate_includes_prior_vision_observation(monkeypatch):
+    """A stalled image task hands the child direct vision evidence, not just
+    the original request (live: gaia-cca530fc re-read the board with ASCII)."""
+    class _VisionStub(_StallReader):
+        async def execute(self, args, ctx):
+            self.exec_count += 1
+            return ToolResult(status="ok", tool_name=self.name,
+                              result="d8: black rook; h5: white queen")
+
+    vision = _VisionStub("llm.call")
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    check = _EscapeStub("code.check")
+    script = [_tc("llm.call", '{"task":"read board","images":["board.png"]}')]
+    script += _reads(5) + [
+        _tc("x.read", '{"n": 5}'),
+        _tc("x.read", '{"n": 6}'),
+        _tc("code.check", '{"command": "verify"}'),
+        _final("done"),
+    ]
+    _patch_delegate_route(monkeypatch)
+    out, _, _, _, _ = _stall_stop_rt(
+        script, [vision, reader, delegate, check])
+    assert out["status"] == "ok"
+    brief = delegate.last_args["task"]
+    assert "DIRECT VISION TOOL OUTPUT" in brief
+    assert "d8: black rook; h5: white queen" in brief
+
+
 def test_auto_delegate_salvages_wrap_up(monkeypatch):
     """guard_max reached on the same turn as the refusal streak: the salvage
     delegation is real progress, so wrap-up (tools off) never engages and the

@@ -242,6 +242,11 @@ class DispatchGateContext:
                  "or attempts are correct.\n\nORIGINAL REQUEST:\n"
                  + ((self.user_message or "")[:6000]
                     if isinstance(self.user_message, str) else reason))
+        if rs.vision_handoff:
+            brief += ("\n\nDIRECT VISION TOOL OUTPUT from the parent run. "
+                      "This is evidence, not an intermediate solution; use "
+                      "it and re-check the source image if needed:\n"
+                      + rs.vision_handoff[:6000])
         args = {"task": brief, "strength": tag}
         result = await self.runtime._execute_tool(tool_name, args, self.ctx)
         ok = result.status == "ok"

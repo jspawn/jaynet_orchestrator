@@ -41,6 +41,9 @@ class RunState:
     # text-only specialist must never inherit the brain's True (live: gaia
     # image turns hit the radiance specialist → hard error → fallback).
     vision_enabled: bool = True
+    # Latest direct vision-model observation, kept outside the transcript so
+    # auto-delegation can hand it to the child even after compaction.
+    vision_handoff: str = ""
     tools_schema: list[dict] = field(default_factory=list)
     expansions_used: int = 0
     # Lazily-started per-run subcall server (runtime/subcall.py); Any to

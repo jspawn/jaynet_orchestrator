@@ -391,6 +391,22 @@ def test_delegate_explicit_model_skips_routing(monkeypatch):
     assert seen["model"] == "glm-5.2"
 
 
+def test_delegate_coding_child_has_vision_lane(monkeypatch):
+    """The image skill's prescribed llm.call must exist in a coding child."""
+    _patch_slots(monkeypatch, {
+        "specialist": {"preset": "s", "serving": "coder",
+                       "strengths": ["coding"], "alias": "local-specialist"}})
+    seen = {}
+
+    async def spawn(task, tools=None, **kwargs):
+        seen["tools"] = tools
+        return {"status": "ok", "answer": "done", "run_id": "s", "budget": {}}
+
+    run(SpecialistDelegate().execute({"task": "solve the diagram"},
+                                     _delegate_ctx(spawn)))
+    assert "llm.call" in seen["tools"]
+
+
 # ---- strength registry + prompt directory -----------------------------------------
 
 def test_strength_registry_parses_and_tolerates_junk():
