@@ -132,6 +132,26 @@ def test_multiple_guards_sorted_by_cases(tmp_path, monkeypatch, capsys):
     assert "budget_guard" in lines[1]
 
 
+def test_delegation_fanout_and_llm_subcalls_are_distinct(tmp_path, monkeypatch, capsys):
+    _mk_eval_db(tmp_path / "eval.db", [
+        ("specialist", 0, ["r1"], "ok"),
+        ("fanout", 0, ["r2"], "ok"),
+        ("vision", 0, ["r3"], "ok"),
+    ])
+    _mk_trace_db(tmp_path / "trace.db", [
+        ("r1", "tool_result", {"tool": "specialist.delegate", "status": "ok",
+                               "model": "local-specialist"}),
+        ("r2", "tool_result", {"tool": "agent.spawn", "status": "ok"}),
+        ("r3", "tool_result", {"tool": "llm.call", "status": "ok",
+                               "model": "local-specialist"}),
+    ])
+    out = _peek(tmp_path, monkeypatch, capsys)
+    assert "specialist  " in out and "-> specialist" in out
+    assert "fanout  " in out and "-> fanout" in out
+    assert "vision  " in out and "-> llm.call" in out
+    assert "delegation 1/3 | fanout 1 | llm.call 1" in out
+
+
 def test_missing_trace_db_notes_no_trace_data(tmp_path, monkeypatch, capsys):
     _mk_eval_db(tmp_path / "eval.db", [("case-a", 1, ["r1"], "ok")])
     out = _peek(tmp_path, monkeypatch, capsys)   # no trace.db at all

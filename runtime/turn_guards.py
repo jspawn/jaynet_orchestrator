@@ -12,11 +12,11 @@ guards (runtime/final_guards.py, step 2):
   the message/event interleaving stays exactly as the inline era.
 - POST_TOOL_GUARDS fire after each tool result is recorded (before the
   tool message is appended): the failure-streak nudge, per-host give-up,
-  verify-arm bookkeeping, the delegate soft nudge and the badge watch.
-  A guard's check() returns None when it did not fire, else its hint
-  text (possibly "" — the verify-arm guard's fire IS the arming, it
-  appends no text). The loop reassembles the hints in the LEGACY
-  concatenation order fail → delegate → badge → host
+  verify-arm bookkeeping, research synthesis checkpoint, delegate soft
+  nudge and badge watch. A guard's check() returns None when it did not
+  fire, else its hint text (possibly "" — the verify-arm guard's fire IS
+  the arming, it appends no text). The loop reassembles the hints in the
+  concatenation order fail → research → delegate → badge → host
   (_POST_TOOL_HINT_SLOTS) — registry order encodes the historical
   SIDE-EFFECT order, the slot order the byte-identical result content.
 
@@ -715,6 +715,39 @@ class VerifyArmGuard(PostToolGuard):
         return "" if fired else None
 
 
+class ResearchSynthesisGuard(PostToolGuard):
+    """After extensive research, pause collection once and delegate synthesis
+    with the gathered evidence. Fresh results are progress, so this never
+    auto-delegates the original request from scratch. 0 disables."""
+    name = "research_synthesis"
+    slot = "research"
+
+    def __init__(self, tctx: TurnGuardContext) -> None:
+        super().__init__(tctx)
+        try:
+            self.after = int(tctx.lg_cfg.get("research_delegate_after", 24) or 0)
+        except (TypeError, ValueError):
+            self.after = 24
+
+    async def check(self, rs: RunState, call: ToolCallView) -> str | None:
+        if (not self.after or rs.research_synthesis_nudged
+                or rs.web_calls < self.after or rs.delegated
+                or rs.auto_delegated or rs.wrap_up or self.tctx.depth != 0):
+            return None
+        available = self.tctx.runtime.registry.get("specialist.delegate")
+        if (available is None or (rs.allowed is not None
+                                  and "specialist.delegate" not in rs.allowed)):
+            return None
+        rs.research_synthesis_nudged = True
+        return (
+            f"\n\n[system note] You have made {rs.web_calls} research calls. "
+            "Pause collection: reconcile the evidence and contradictions, "
+            "then delegate a self-contained synthesis task with "
+            "specialist.delegate(strength='research'). Include the gathered "
+            "evidence and exact unresolved question; do not restart the "
+            "research from scratch.")
+
+
 class DelegateNudgeGuard(PostToolGuard):
     """Delegate gate (soft mode): count successful inline write/edit calls
     while specialist.delegate is available but unused. At the threshold,
@@ -779,12 +812,13 @@ class BadgeWatchGuard(PostToolGuard):
 
 #: The post-tool guard chain, in SIDE-EFFECT order (the historical order of
 #: the inline blocks). The hint TEXT reassembles in the legacy fail →
-#: delegate → badge → host order via each guard's `slot`:
+#: research → delegate → badge → host order via each guard's `slot`:
 #: ORDER IS LOAD-BEARING; append new guards, never reorder silently.
 POST_TOOL_GUARDS: list[type[PostToolGuard]] = [
     FailureStreakGuard,
     HostGiveUpGuard,
     VerifyArmGuard,
+    ResearchSynthesisGuard,
     DelegateNudgeGuard,
     BadgeWatchGuard,
 ]
@@ -797,4 +831,4 @@ POST_TOOL_GUARDS: list[type[PostToolGuard]] = [
 #: Legacy tool-result content order: the inline era appended
 #: fail_hint + delegate_hint + badge_hint + host_hint. The loop
 #: reassembles fired hints in exactly this order (byte-identical content).
-_POST_TOOL_HINT_SLOTS = ("fail", "delegate", "badge", "host")
+_POST_TOOL_HINT_SLOTS = ("fail", "research", "delegate", "badge", "host")

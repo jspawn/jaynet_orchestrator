@@ -145,18 +145,19 @@ def main() -> None:
         print("no results in window")
         return
 
-    npass = ndeleg = ninvalid = 0
+    npass = ndeleg = nfanout = nsubcall = ninvalid = 0
     guard_stats: dict[str, list[int]] = {}   # name -> [fires, cases, fired+passed]
     for tid, passed, rids, elapsed, notes, ts, rstatus in rows:
         invalid = rstatus == "invalid"   # fallback-served: unmeasurable
         ninvalid += invalid
         rids = json.loads(rids or "[]")
-        models, ncalls, fires = set(), 0, {}
+        tools, ncalls, fires = set(), 0, {}
         if ev is not None and rids:
             qq = ",".join("?" * len(rids))
-            models = {r[0] for r in ev.execute(
-                "SELECT DISTINCT json_extract(payload_json,'$.model') "
-                f"FROM events WHERE run_id IN ({qq})", rids) if r[0]}
+            tools = {r[0] for r in ev.execute(
+                "SELECT DISTINCT json_extract(payload_json,'$.tool') "
+                f"FROM events WHERE run_id IN ({qq}) AND kind='tool_result' "
+                "AND json_extract(payload_json,'$.status')='ok'", rids) if r[0]}
             ncalls = ev.execute(
                 "SELECT COUNT(*) FROM events "
                 f"WHERE run_id IN ({qq}) "
@@ -173,23 +174,31 @@ def main() -> None:
                 s[0] += n            # a guard can fire several times per case
                 s[1] += 1            # cases it touched (fire rate's denominator)
                 s[2] += bool(passed)
-        other = sorted(m for m in models if m != "local-orchestrator")
+        specialist = bool(tools & {"specialist.delegate", "code.delegate"})
+        fanout = bool(tools & {"agent.spawn", "agent.fanout"})
+        subcall = "llm.call" in tools
         npass += bool(passed) and not invalid
-        ndeleg += bool(other)
+        if not invalid:
+            ndeleg += specialist
+            nfanout += fanout
+            nsubcall += subcall
+        labels = (["specialist"] if specialist else []) \
+            + (["fanout"] if fanout else []) + (["llm.call"] if subcall else [])
         note = (notes or "").replace("\n", " ")
         note = note if args.full else note[:110]
         gtxt = ",".join(f"{k}×{v}" for k, v in sorted(fires.items()))
         print(f"{'INVL' if invalid else 'PASS' if passed else 'fail'}  {tid:<28} "
               f"{int(elapsed or 0):>5}s  {ncalls:>3} calls"
               + (f"  guards: {gtxt}" if gtxt else "")
-              + (f"  -> {','.join(other)}" if other else ""))
+              + (f"  -> {','.join(labels)}" if labels else ""))
         if note:
             print(f"      {note}")
     counted = len(rows) - ninvalid
     print(f"\ntotal {counted} (+{ninvalid} invalid) | passed {npass} "
           f"({npass * 100 // max(counted, 1)}%"
           f"{_fmt_ci(npass, counted)}) "
-          f"| delegation {ndeleg}/{counted}")
+          f"| delegation {ndeleg}/{counted} | fanout {nfanout} "
+          f"| llm.call {nsubcall}")
     if guard_stats:
         print("\nguards: fires | cases | pass rate fired vs quiet "
               "(pass-after-fire ~0 = the rail only sees doomed runs):")

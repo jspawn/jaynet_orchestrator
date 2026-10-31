@@ -56,7 +56,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   refusals the harness runs the delegation itself, default 2 — inside a
   badged-but-planless j-space run it first closes the badge-gate ceremony
   harness-side (badge + 3-item salvage plan, attributed to the loop guard,
-  never the brain);
+  never the brain); `loop_guard.research_delegate_after`: after N research
+  calls, a one-shot checkpoint delegates synthesis with the gathered evidence,
+  default 24, never an automatic from-scratch retry;
   `loop_guard.jspace_badge_gate`: in a j-space run, file edits outside the
   `.jspace/` ledger and delegate/spawn calls are REFUSED at dispatch until
   the `run.badge` opener and a todos plan are in place — the refusal reads

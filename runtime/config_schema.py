@@ -350,6 +350,7 @@ class LoopGuardConfig(_Section):
     stall_hard_stop: bool = True
     jspace_badge_gate: bool = True
     host_give_up_after: int = 4
+    research_delegate_after: int = 24
     delegate_nudge_after: int = 3
     delegate_enforce: bool = False
     delegate_escalate: bool = True

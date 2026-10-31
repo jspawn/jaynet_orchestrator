@@ -122,6 +122,7 @@ class RunState:
     stuck_signals: list[str] = field(default_factory=list)
     stuck_fired: bool = False
     web_calls: int = 0
+    research_synthesis_nudged: bool = False
     # Fresh-perspective retry: delegated task clusters + their outcomes.
     delegate_trials: list[dict] = field(default_factory=list)
     # Auto-delegate (loop_guard.auto_delegate_after): delegate-pointing

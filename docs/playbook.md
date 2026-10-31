@@ -63,8 +63,12 @@ final rung gets its tools refused (**stall hard-stop**) — `fs.write`/
 the ladder's own mutation reset — if no delegation
 can salvage it, the refusals end after `loop_guard.auto_delegate_after` and
 the run wraps up with tools off for a forced synthesis instead of burning
-iterations to the cap; a run the iteration cap does catch gets **one final
-no-tools synthesis turn** (`agent.final_synthesis`, default on) so it returns
+iterations to the cap. After 24 research calls, a one-shot
+**research synthesis checkpoint** (`loop_guard.research_delegate_after`)
+directs the brain to reconcile its evidence and delegate a self-contained
+synthesis task instead of restarting from scratch; a run the iteration cap
+does catch gets **one final no-tools synthesis turn**
+(`agent.final_synthesis`, default on) so it returns
 findings-plus-unverified instead of "(no answer produced yet)"; the
 **deliverable check**
 bounces a final answer that never wrote the task-named file (with an early

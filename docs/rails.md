@@ -55,8 +55,9 @@ side-effect order below.
 | 1 | `failure_streak` | post_tool | `loop_guard.failure_nudge_after` | 3 | Crash/failure-loop escalation: execution tools (code.run/code.execute) report command failures in their PAYLOA… | live bench run |
 | 2 | `host_give_up` | post_tool | `loop_guard.host_give_up_after` | 4 | Diminishing returns per HOST: the same-signature streak misses the loop where every call has DIFFERENT args bu… | live: gaia-4b6bb5f7 burned 44 calls on Scribd timeouts/login walls |
 | 3 | `verify_arm` | post_tool | `— (bookkeeping for the final-answer bounces + fresh-retry)` | — | Arming bookkeeping for the final-answer bounces (no hint text — its fire IS the state change, reported as an e… | — |
-| 4 | `delegate_nudge` | post_tool | `loop_guard.delegate_nudge_after` | 3 | Delegate gate (soft mode): count successful inline write/edit calls while specialist.delegate is available but unused. | — |
-| 5 | `badge_watch` | post_tool | `skill frontmatter requires_badge; gate: loop_guard.jspace_badge_gate` | true | Badge watch REMINDER: a skill with `requires_badge: true` in frontmatter asks the model to badge the run (run.… | — |
+| 4 | `research_synthesis` | post_tool | `loop_guard.research_delegate_after` | 24 | After extensive research, pause collection once and delegate synthesis with the gathered evidence. | — |
+| 5 | `delegate_nudge` | post_tool | `loop_guard.delegate_nudge_after` | 3 | Delegate gate (soft mode): count successful inline write/edit calls while specialist.delegate is available but unused. | — |
+| 6 | `badge_watch` | post_tool | `skill frontmatter requires_badge; gate: loop_guard.jspace_badge_gate` | true | Badge watch REMINDER: a skill with `requires_badge: true` in frontmatter asks the model to badge the run (run.… | — |
 
 ## Final-answer guards (runtime/final_guards.py FINAL_ANSWER_GUARDS)
 

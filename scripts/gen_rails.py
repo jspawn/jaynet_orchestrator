@@ -46,6 +46,7 @@ META: dict[str, tuple[str, str]] = {
     "host_give_up": ("loop_guard.host_give_up_after", "4"),
     "verify_arm": ("— (bookkeeping for the final-answer bounces + fresh-retry)",
                    "—"),
+    "research_synthesis": ("loop_guard.research_delegate_after", "24"),
     "delegate_nudge": ("loop_guard.delegate_nudge_after", "3"),
     "badge_watch": ("skill frontmatter requires_badge; gate: "
                     "loop_guard.jspace_badge_gate", "true"),

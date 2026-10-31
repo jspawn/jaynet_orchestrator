@@ -8,7 +8,7 @@ turns:
   # the main context is the anti-pattern agent.fanout exists to replace.
   - user: "I need answers to three independent questions: (1) What is the capital of Japan? (2) What is 6 times 7? (3) What is the chemical symbol for gold? Handle them as separate parallel subtasks and give me all three answers together."
 expect:
-  must_use_tools: [agent.fanout]
+  # The rubric accepts either agent.fanout or several agent.spawn children.
   answer_contains_any: ["tokyo", "42", "au"]
 judge_rubric: |
   Pass if the agent fanned the three questions out via agent.fanout (one

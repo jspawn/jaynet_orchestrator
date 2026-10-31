@@ -221,6 +221,12 @@ loop_guard:
   # (switch source, or report the gap and finish). A healthy result from that
   # host resets its counter. 0 disables.
   host_give_up_after: 4
+  # Extensive-research checkpoint: after this many web/arxiv/browser calls,
+  # append a ONE-SHOT directive to reconcile the evidence and delegate a
+  # self-contained synthesis task (including that evidence) to the research
+  # specialist. Fresh results are real progress, so never auto-delegate the
+  # original request from scratch. Once per run, brain depth only. 0 disables.
+  research_delegate_after: 24
   # Delegate gate: the brain's prompt tells it to hand non-trivial coding to
   # specialist.delegate (specialist model, bulky transcript stays in the child),
   # but small MoE brains implement inline anyway — live eval: 17 inline
