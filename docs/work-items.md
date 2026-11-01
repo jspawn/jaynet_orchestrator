@@ -36,7 +36,7 @@ promise.
 ## Current failure windows
 
 The scheduler currently advances `schedules.json` before launching the run
-(`web/routes_procs.py`). A crash afterwards consumes the occurrence without a
+(`web/scheduler_runtime.py`). A crash afterwards consumes the occurrence without a
 run or history. Completion then writes `schedule_runs`, JSON `last_status`, and
 the scheduled chat separately, so a crash can lose or duplicate delivery.
 Concurrent scheduled chat completion also reads and replaces the whole chat,
@@ -185,7 +185,7 @@ audit, not a queue.
 2. **Idempotent delivery:** add `ChatStore.append_scheduled_turn`; test duplicate
    delivery and two concurrent completions without lost turns.
 3. **Scheduler integration:** adapt the current tick/fire seam in
-   `web/routes_procs.py`; preserve `_DenyConfirm`, role/tool gates, project and
+   `web/scheduler_runtime.py`; preserve `_DenyConfirm`, role/tool gates, project and
    scratch roots, bus/task ownership, history, and recurrence behavior. Make
    `mark_fired` conditional on the expected occurrence and enabled definition.
 4. **Startup and lifecycle:** register recovery and dispatch hooks, cancel queued

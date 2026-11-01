@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.41.4 — 2026-11-01
+
+- **Brain overlay concurrency:** accept and rollback now serialize their full
+  read/merge/write transactions. Concurrent accepts produce a clean stale-base
+  response instead of HTTP 500 or a successor that silently drops a lesson.
+- **Cross-model eval correctness:** judge state and result provenance resolve
+  overlays from the variant's actual model, never from the configured brain.
+- **Docs and checks:** refreshed Schedules and model-server screenshots, fixed
+  the scheduler code map, documented process usage, and banked the mypy shrink.
+
+## 1.41.3 — 2026-11-01
+
+- **LiteLLM auth errors:** install Prisma in the stateless proxy environment so
+  a missing API key returns HTTP 401 instead of an error-handler HTTP 500.
+
 ## 1.41.2 — 2026-10-30
 
 - **Versioned per-brain overlays:** accepted eval lessons now target the brain

@@ -333,7 +333,8 @@ def _git_provenance() -> tuple[str | None, int | None]:
     return sha, dirty
 
 
-def _provenance(cfg: dict, experiment: dict | None = None) -> dict:
+def _provenance(cfg: dict, experiment: dict | None = None,
+                model: str | None = None) -> dict:
     """The provenance columns for one result row. Every piece degrades to
     None on ANY error — a broken checkout, missing prompt file or unparsable
     preset must not lose the eval result."""
@@ -342,7 +343,8 @@ def _provenance(cfg: dict, experiment: dict | None = None) -> dict:
     from runtime import brain_overlays, paths
     from runtime.preset_store import brain_overlay_for
     sha, dirty = _git_provenance()
-    model = (cfg.get("orchestrator") or {}).get("model") or "local-orchestrator"
+    model = (model or (cfg.get("orchestrator") or {}).get("model")
+             or "local-orchestrator")
     overlay_meta = brain_overlay_for(cfg, model)
     active = overlay_meta["overlay"]
     prompt_hash = None
@@ -2434,7 +2436,8 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     experiment = (ctx.variant or {}).get("experiment_overlay") or {}
     from runtime import brain_overlays
     from runtime.preset_store import brain_overlay_for
-    model = (getattr(runtime, "model", None)
+    model = ((ctx.variant or {}).get("model")
+             or getattr(runtime, "model", None)
              or (runtime.config.get("orchestrator") or {}).get("model"))
     active = brain_overlay_for(runtime.config, model)["overlay"]
     prompt_additions = [active["prompt_addition"],
@@ -2531,7 +2534,8 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
     fb = _fallback_fields(runtime, case_t0, ctx.fallback_tag or None)
     status, passed = _fallback_verdict(runtime, fb, status, passed, judged)
     experiment = (variant or {}).get("experiment_overlay") or {}
-    prov = _provenance(runtime.config or {}, experiment=experiment)
+    prov = _provenance(runtime.config or {}, experiment=experiment,
+                       model=(variant or {}).get("model"))
 
     row = {"test_id": case.id, "passed": passed, "score": judged["score"],
            "judge_notes": judged["notes"], "judge_model": judged["judge_model"],

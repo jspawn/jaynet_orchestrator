@@ -249,6 +249,10 @@ class BrainOverlayStore:
         changes = clean_overlay(changes)
         self.ensure()
         with self._conn() as conn:
+            # Serialize the whole read/merge/write sequence. Otherwise two
+            # accepts can pass the same base check and lose one lesson or hit
+            # the version/proposal uniqueness constraints.
+            conn.execute("BEGIN IMMEDIATE")
             if proposal_id is not None:
                 prior = conn.execute(
                     "SELECT * FROM preset_overlay_versions WHERE proposal_id=?",
@@ -286,6 +290,9 @@ class BrainOverlayStore:
     def rollback(self, preset: str, source_version: int) -> dict:
         self.ensure()
         with self._conn() as conn:
+            # Match apply(): snapshot selection and version allocation are one
+            # serialized write transaction.
+            conn.execute("BEGIN IMMEDIATE")
             source = conn.execute(
                 "SELECT * FROM preset_overlay_versions WHERE preset=? AND version=?",
                 (preset, int(source_version))).fetchone()

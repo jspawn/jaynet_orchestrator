@@ -34,6 +34,7 @@ split across `loop.py`, `dispatch_guards.py`, `turn_guards.py`,
 | File | What lives here |
 |---|---|
 | `runtime/process_manager.py` | `ProcessManager` — autostart/stop/monitor/restart of llama-servers and plugin sidecars. |
+| `runtime/model_usage.py` | Per-process RAM, per-GPU VRAM, and model-artifact disk usage behind the admin process usage view. |
 | `runtime/serving.py` | Serve primitives: launch/stop/wait-healthy, VRAM probes, port picking, litellm register/deregister. |
 | `runtime/preset_store.py` | `PresetStore` — presets.db (SQLite), slot assignment (`resolve_slot`/`set_slot`), seeds from `presets/*.conf`; per-model harness profiles (`profile` column, `profile_for` alias resolution — §4b). |
 | `runtime/serve_preset.py` | Flat KEY=VALUE preset parser (model path, MMPROJ, ALIAS, llama-server flags). |

@@ -650,7 +650,7 @@ with a full management view here.
   keep firing — you manage them in this table. The eval-suite scheduler
   under Eval is a separate, eval-only mechanism.
 
-![Admin → Schedules: the create form (owner, kind, timing, project) and the schedules table with next fire, last status and per-row history](../screenshots/admin-schedules.png)
+![Admin → Schedules: the create form (owner, source, query or prompt, timing, project), schedule state and per-row work/attempt/delivery history](../screenshots/admin-schedules.png)
 
 ## Users
 
