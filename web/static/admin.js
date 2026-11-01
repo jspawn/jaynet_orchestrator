@@ -1438,6 +1438,12 @@ async function loadSchedHistory(id,tr){
     "<span class='muted'>"+_fmtTs(r.fired_at)+"</span>"+
     "<span class='muted'> · "+(r.duration_s!=null?Number(r.duration_s).toFixed(1)+"s":"—")+"</span>"+
     (r.tokens?"<span class='muted'> · "+r.tokens+" tok</span>":"")+
+    (r.item_id?"<div class='muted' style='font-size:12px' title='item "+esc(r.item_id)+" / attempt "+esc(r.attempt_id||"")+"'>"+
+      "work "+esc(r.work_status||"?")+" · attempt "+(r.attempt_no||"?")+
+      " · delivery "+esc(r.delivery_status||"not required")+
+      (r.scheduled_for?" · scheduled "+_fmtTs(r.scheduled_for):"")+"</div>":"")+
+    ((r.work_error||r.delivery_error)?"<div class='muted' style='font-size:12px'>"+
+      esc(r.work_error||r.delivery_error)+"</div>":"")+
     "<div class='muted' style='font-size:12px'>"+esc(String(r.excerpt||"").slice(0,200))+"</div></div>"
   ).join("")||"<span class='muted'>no runs yet</span>")+"</td>";
   tr.after(hr);

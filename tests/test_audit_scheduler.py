@@ -101,6 +101,10 @@ class _Chats:
     def upsert(self, chat_id, title, turns, owner=None):
         self.upserts.append({"chat_id": chat_id, "turns": turns, "owner": owner})
 
+    def append_scheduled_turn(self, owner, prompt, turn):
+        self.upsert(None, "⏰ Scheduled runs", [turn], owner=owner)
+        return {"duplicate": False}
+
 
 class _Bus:
     async def publish(self, run_id, event):

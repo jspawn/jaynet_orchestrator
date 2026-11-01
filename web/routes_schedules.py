@@ -18,13 +18,22 @@ from fastapi import HTTPException
 
 from runtime import paths as _paths
 from runtime.scheduler import ScheduleStore, parse_cron, parse_every, parse_when
+from runtime.work_store import WorkStore
 from web import projects as PJ
 from web.models import (
     ScheduleCreateRequest,
     ScheduleEnabledRequest,
     SchedulesAllowedRequest,
 )
-from web.store import ScheduleRunStore
+
+
+def _set_enabled(schedules: ScheduleStore, work: WorkStore,
+                 sid: str, enabled: bool) -> bool:
+    if not schedules.set_enabled(sid, enabled):
+        return False
+    if not enabled:
+        work.cancel_source(sid, "schedule disabled before launch")
+    return True
 
 
 def register(app, s):
@@ -37,9 +46,8 @@ def register(app, s):
         cfg = (runtime.config.get("tools") or {}).get("schedule", {}) or {}
         return ScheduleStore(cfg.get("store", str(_paths.DATA / "schedules.json")))
 
-    def _run_store() -> ScheduleRunStore:
-        return ScheduleRunStore(
-            s.web_cfg.get("chats_db") or str(_paths.CHATS_DB))
+    def _work_store() -> WorkStore:
+        return WorkStore(s.web_cfg.get("chats_db") or str(_paths.CHATS_DB))
 
     def _project_name(owner: str | None, pid: str | None) -> str | None:
         if not pid:
@@ -104,7 +112,7 @@ def register(app, s):
 
     @app.put("/api/admin/schedules/{sid}")
     async def admin_set_schedule_enabled(sid: str, req: ScheduleEnabledRequest):
-        if not _sched_store().set_enabled(sid, req.enabled):
+        if not _set_enabled(_sched_store(), _work_store(), sid, req.enabled):
             raise HTTPException(status_code=404, detail="no such schedule")
         return {"ok": True}
 
@@ -112,13 +120,14 @@ def register(app, s):
     async def admin_delete_schedule(sid: str):
         if not _sched_store().remove(sid, None):     # admin: any owner
             raise HTTPException(status_code=404, detail="no such schedule")
+        _work_store().cancel_source(sid, "schedule deleted before launch")
         return {"ok": True}
 
     @app.get("/api/admin/schedules/{sid}/history")
     async def admin_schedule_history(sid: str):
         if not any(e.get("id") == sid for e in _sched_store().list()):
             raise HTTPException(status_code=404, detail="no such schedule")
-        return {"runs": _run_store().history(schedule_id=sid)}
+        return {"runs": _work_store().history(schedule_id=sid)}
 
     @app.post("/api/admin/users/{username}/schedules")
     async def admin_set_schedules_allowed(username: str,

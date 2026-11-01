@@ -43,6 +43,8 @@ own one-line audience header under the title.*
   file.
 - [turn.md](turn.md) — the exact execution order of one loop iteration;
   [rails.md](rails.md) — the generated registry of every guard/gate.
+- [work-items.md](work-items.md) — durable scheduled work, crash recovery,
+  and idempotent delivery: design and phase-1 implementation record.
 - [development.md](development.md) — running the suite, CI gates,
   conventions; [testing.md](testing.md) — what every test file covers;
   [testing-harness.md](testing-harness.md) — the `test.run` harness.

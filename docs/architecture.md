@@ -79,8 +79,11 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
   systemd units for models.
 - **RAG** (`tools/rag/`) — embed (:8095) + optional rerank (:8096), direct
   HTTP, not via LiteLLM.
-- **Scheduler** (`runtime/scheduler.py`) — `schedule.*` tools + web tick fire
-  recurring/one-shot runs.
+- **Scheduler** (`runtime/scheduler.py`, `runtime/work_store.py`,
+  `web/scheduler_runtime.py`) — `schedule.*` tools and durable recurring/one-shot
+  runs. SQLite occurrence dedupe and atomic claims survive restarts; launched
+  work becomes `interrupted` rather than replaying automatically. A transactional
+  outbox appends results to the scheduled chat idempotently.
 - **Chains** (`tools/chain/`, `chains/*.yaml`) — named, reusable multi-step
   pipelines: sequential sub-agent + local prompt steps wired with
   `{{input}}` / `{{steps.<id>.output}}` placeholders, run via `chain.run`.

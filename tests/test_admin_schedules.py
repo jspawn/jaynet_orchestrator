@@ -6,6 +6,7 @@ import time
 import pytest
 
 from runtime.scheduler import ScheduleStore
+from runtime.work_store import WorkStore
 from web import projects as PJ
 from web.store import ScheduleRunStore
 
@@ -145,6 +146,32 @@ async def test_history_endpoint(tmp_path, web_app, web_client):
         assert rows[0]["status"] == "ok" and rows[0]["excerpt"] == "did it"
         r = await c.get("/api/admin/schedules/nope/history")
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_disable_and_delete_cancel_queued_work(tmp_path, web_app, web_client):
+    app = web_app()
+    app.state.users.create("alice", "alicepass")
+    store = _point_store(app, tmp_path)
+    work = WorkStore(app.state.runtime.config["web"]["chats_db"])
+    disabled = store.add({"owner": "alice", "prompt": "x", "kind": "every",
+                          "every_s": 60, "next_fire": time.time() + 3600})
+    deleted = store.add({"owner": "alice", "prompt": "y", "kind": "every",
+                         "every_s": 60, "next_fire": time.time() + 3600})
+    work.enqueue_occurrence(disabled)
+    work.enqueue_occurrence(deleted)
+    async with web_client(app) as c:
+        r = await c.put(f"/api/admin/schedules/{disabled['id']}",
+                        json={"enabled": False})
+        assert r.status_code == 200
+        rows = (await c.get(
+            f"/api/admin/schedules/{disabled['id']}/history")).json()["runs"]
+        assert rows[0]["status"] == "cancelled"
+        assert rows[0]["work_status"] == "cancelled"
+        assert rows[0]["attempt_status"] == "cancelled"
+        assert (await c.delete(
+            f"/api/admin/schedules/{deleted['id']}")).status_code == 200
+    assert work.history(deleted["id"])[0]["status"] == "cancelled"
 
 
 # ---- per-user flag endpoint ------------------------------------------------------

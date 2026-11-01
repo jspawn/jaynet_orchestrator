@@ -7,11 +7,14 @@ import pytest
 
 from runtime.scheduler import ScheduleStore, parse_every, parse_when
 from runtime.tool_base import ToolContext
+from runtime.work_store import WorkStore
 from tools.schedule.schedule import ScheduleAdd, ScheduleList, ScheduleRemove
 
 
 def _ctx(owner="alice", store_path=None):
     cfg = {"tools": {"schedule": {"store": str(store_path)}}} if store_path else {}
+    if store_path:
+        cfg["web"] = {"chats_db": str(store_path) + ".chats"}
     return ToolContext(request_id="t", config=cfg, budget=None, owner=owner)
 
 
@@ -80,6 +83,29 @@ def test_store_recurring_advances_without_drift(tmp_path):
     assert (after["next_fire"] - t0) % 3600 == 0
 
 
+def test_mark_fired_requires_expected_enabled_occurrence(tmp_path):
+    s = ScheduleStore(str(tmp_path / "s.json"))
+    e = s.add({"owner": "a", "prompt": "x", "kind": "once", "next_fire": 100.0})
+    assert not s.mark_fired(e["id"], expected_next_fire=99.0)
+    assert s.list()[0]["fire_count"] == 0
+    assert s.mark_fired(e["id"], expected_next_fire=100.0)
+    consumed = s.list()[0]
+    assert consumed["last_occurrence"] == 100.0
+    assert not consumed["enabled"] and not consumed.get("manual_disabled")
+    assert not s.mark_fired(e["id"], expected_next_fire=100.0)
+    assert s.list()[0]["fire_count"] == 1
+
+
+def test_manual_disable_is_distinct_from_consumed_one_shot(tmp_path):
+    s = ScheduleStore(str(tmp_path / "s.json"))
+    e = s.add({"owner": "a", "prompt": "x", "kind": "once", "next_fire": 100.0})
+    s.mark_fired(e["id"], expected_next_fire=100.0)
+    s.set_enabled(e["id"], False)
+    assert s.list()[0]["manual_disabled"] is True
+    s.set_enabled(e["id"], True)
+    assert "manual_disabled" not in s.list()[0]
+
+
 def test_store_tolerates_missing_and_corrupt_file(tmp_path):
     s = ScheduleStore(str(tmp_path / "missing.json"))
     assert s.list() == []
@@ -108,6 +134,18 @@ def test_add_list_remove_roundtrip(tmp_path):
     sid = lst["schedules"][0]["id"]
     assert _run(ScheduleRemove(), {"id": sid}, ctx).status == "ok"
     assert _run(ScheduleList(), {}, ctx).result["count"] == 1
+
+
+def test_remove_cancels_queued_work(tmp_path):
+    store = tmp_path / "s.json"
+    ctx = _ctx(store_path=store)
+    saved = ScheduleStore(str(store)).add(
+        {"owner": "alice", "prompt": "x", "kind": "every",
+                             "every_s": 60, "next_fire": time.time() + 60})
+    work = WorkStore(ctx.config["web"]["chats_db"])
+    work.enqueue_occurrence(saved)
+    assert _run(ScheduleRemove(), {"id": saved["id"]}, ctx).status == "ok"
+    assert work.history(saved["id"])[0]["status"] == "cancelled"
 
 
 def test_owner_scoping(tmp_path):

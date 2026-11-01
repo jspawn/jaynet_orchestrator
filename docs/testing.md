@@ -118,7 +118,8 @@ Fixtures (`tests/conftest.py`):
 | `test_verify.py` · `test_verify_gate.py` · `test_verify_env.py` | verify.* scoring; verifier-gated termination; check-command env |
 | `test_council.py` · `test_eval_compare_coverage.py` | council.debate flow; eval.compare |
 | `test_ops.py` | ops.run allowlist + metachar rejection |
-| `test_scheduler.py` · `test_job_wait.py` | schedule.* parsing/store/scoping; job.wait poll exemption |
+| `test_scheduler.py` · `test_job_wait.py` | schedule.* parsing/store/scoping; conditional occurrence advancement; job.wait poll exemption |
+| `test_work_store.py` · `test_scheduled_chat.py` · `test_scheduler_web.py` | durable work transitions, crash recovery, no-overlap dispatch, idempotent chat outbox, concurrent completion safety |
 | `test_trace_mine.py` | trace.mine sequence extraction + safety flags |
 
 ### Eval harness & gate prompt

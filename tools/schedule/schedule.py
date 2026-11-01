@@ -26,6 +26,13 @@ def _store(ctx: ToolContext) -> ScheduleStore:
     return ScheduleStore(cfg.get("store", str(paths.DATA / "schedules.json")))
 
 
+def _cancel_work(ctx: ToolContext, schedule_id: str) -> None:
+    from runtime import paths
+    from runtime.work_store import WorkStore
+    db_path = (ctx.config.get("web") or {}).get("chats_db") or str(paths.CHATS_DB)
+    WorkStore(db_path).cancel_source(schedule_id, "schedule deleted before launch")
+
+
 def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="minutes")
 
@@ -130,5 +137,6 @@ class ScheduleRemove(Tool):
         if not ok:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"no schedule with id {args.get('id')!r} (yours only)")
+        _cancel_work(ctx, args["id"])
         return ToolResult(status="ok", tool_name=self.name,
                           result={"removed": args["id"]})

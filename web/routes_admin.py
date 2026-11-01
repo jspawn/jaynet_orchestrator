@@ -1603,6 +1603,7 @@ def register(app, s):
         keep the rest (audit 2026-10-12 Medium #1)."""
         from runtime import trace as _trace
         from runtime.scheduler import ScheduleStore
+        from runtime.work_store import WorkStore
         from tools.kg import graph as _kg
         from tools.memory import store as _mem
         from tools.rag import store as _rag
@@ -1626,6 +1627,8 @@ def register(app, s):
             "schedules": _try("schedules", lambda: ScheduleStore(
                 str(sched_path)).remove_owner(username)),
             "schedule_runs": _try("schedule_runs", lambda: ScheduleRunStore(
+                chats.db_path).remove_owner(username)),
+            "work_items": _try("work_items", lambda: WorkStore(
                 chats.db_path).remove_owner(username)),
             "memory": _try("memory", lambda: _mem.delete_owner(
                 str(memory_db), username)),

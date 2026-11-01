@@ -632,8 +632,10 @@ with a full management view here.
   with chain Y, write the file" is one prompt.
 - **Schedules table** — every entry from every user: enabled toggle, next
   fire, last run status pill, fire count, delete. **History** expands a row
-  with the last 50 firings (status, duration, excerpt, tokens) — the full
-  answer always lands in the owner's "⏰ Scheduled runs" chat.
+  with the last 50 firings (status, duration, excerpt, tokens), plus work and
+  attempt state, scheduled occurrence, delivery state, and recovery errors.
+  The full answer lands in the owner's "⏰ Scheduled runs" chat. Disabling or
+  deleting cancels queued work but never kills a run already in flight.
 - Fired runs carry the owner's role: an admin's schedule auto-confirms gated
   tools (config `tools.schedule.auto_confirm`), a non-admin's never does.
   Revoking a user's schedules flag auto-disables the entries they created

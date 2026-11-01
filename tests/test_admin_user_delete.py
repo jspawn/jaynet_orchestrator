@@ -17,6 +17,7 @@ import pytest
 import web.auth
 from runtime.scheduler import ScheduleStore
 from runtime.trace import Trace, delete_owner
+from runtime.work_store import WorkStore
 from tools.kg import graph as kg_store
 from tools.memory import store as mem_store
 from tools.rag import store as rag_store
@@ -55,9 +56,11 @@ def _wire_owner_state(app, tmp_path):
     conn.close()
 
     store = ScheduleStore(sched_path)
+    work = WorkStore(app.state.runtime.config["web"]["chats_db"])
     for owner in ("eve", "bob"):
-        store.add({"owner": owner, "prompt": f"{owner} job", "kind": "once",
-                   "next_fire": time.time() + 3600})
+        entry = store.add({"owner": owner, "prompt": f"{owner} job", "kind": "once",
+                           "next_fire": time.time() + 3600})
+        work.enqueue_occurrence(entry)
 
     tr = Trace(app.state.runtime.config["trace"]["db_path"])
     for owner in ("eve", "bob"):
@@ -86,6 +89,7 @@ async def test_delete_user_removes_schedules_knowledge_and_traces(
     assert r.status_code == 200
     removed = r.json()["state_removed"]
     assert removed["schedules"] == 1
+    assert removed["work_items"] == 1
     assert removed["memory"] == 1
     assert removed["kg"] == 1
     assert removed["rag"] == 1

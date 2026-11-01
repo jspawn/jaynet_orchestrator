@@ -11,7 +11,7 @@ from conftest import run
 from runtime.scheduler import ScheduleStore
 from web import projects as PJ
 from web import routes_procs
-from web.store import ScheduleRunStore
+from web.store import ChatStore, ScheduleRunStore
 
 
 # ---- launcher gating (schedule.add/remove need the flag or admin) ------------
@@ -80,6 +80,10 @@ class _Chats:
 
     def upsert(self, chat_id, title, turns, owner=None):
         self.upserts.append({"chat_id": chat_id, "turns": turns, "owner": owner})
+
+    def append_scheduled_turn(self, owner, prompt, turn):
+        self.upsert(None, "⏰ Scheduled runs", [turn], owner=owner)
+        return {"duplicate": False}
 
 
 class _Bus:
@@ -278,5 +282,86 @@ def test_scheduled_run_gets_deny_confirm_provider(tmp_path):
         provider = seen.get("confirm_provider")
         assert provider is not None
         assert await provider.confirm("r", "ops.run", {}) is False
+
+    run(main())
+
+
+def test_startup_marks_launched_work_interrupted_without_replay(tmp_path):
+    async def main():
+        calls = []
+
+        async def fake_run(msg, **kw):
+            calls.append(kw)
+            return {"answer": "should not run", "status": "ok"}
+
+        s, store, runs = _wired(tmp_path, fake_run,
+                                users=_Users(allowed=["alice"]))
+        entry = store.add({"owner": "alice", "prompt": "x", "kind": "once",
+                           "next_fire": time.time() - 1})
+        s.work_store.enqueue_occurrence(entry)
+        work = s.work_store.claim_next()
+        s.work_store.mark_launched(work["attempt"]["id"])
+        store.mark_fired(entry["id"], expected_next_fire=entry["next_fire"])
+
+        await s.startup_hooks[-1]()
+        s.prompt_sched_task.cancel()
+        await asyncio.sleep(0)
+        assert calls == []
+        row = runs.history(schedule_id=entry["id"])[0]
+        assert row["status"] == "interrupted"
+        enriched = s.work_store.history(entry["id"])[0]
+        assert enriched["attempt_status"] == "interrupted"
+        assert enriched["work_status"] == "interrupted"
+
+    run(main())
+
+
+def test_outbox_retry_after_apply_before_ack_is_not_duplicated(tmp_path):
+    async def main():
+        s, store, _ = _wired(tmp_path, lambda msg, **kw: None)
+        entry = store.add({"owner": "alice", "prompt": "report", "kind": "once",
+                           "next_fire": time.time() - 1})
+        s.work_store.enqueue_occurrence(entry)
+        work = s.work_store.claim_next()
+        s.work_store.finish_attempt(
+            work["attempt"]["id"], result_status="ok", answer="done",
+            duration_s=1, tokens=2)
+        effect = s.work_store.next_effect()
+        payload = effect["payload"]
+        real = ChatStore(s.chats.db_path)
+        turn = {"user_message": "⏰ report", "answer": "done",
+                "run_id": payload["run_id"], "status": "ok", "events": []}
+        real.append_scheduled_turn("alice", "report", turn)  # crash before ack
+        s.chats.append_scheduled_turn = real.append_scheduled_turn
+
+        await s.deliver_scheduled_effects()
+        chats = real.list("alice")
+        assert len(chats) == 1 and chats[0]["turns"] == 1
+        assert s.work_store.history(entry["id"])[0]["delivery_status"] == "applied"
+
+    run(main())
+
+
+def test_deleted_schedule_is_revalidated_before_launch(tmp_path):
+    async def main():
+        calls = []
+
+        async def fake_run(msg, **kw):
+            calls.append(kw)
+            return {"answer": "bad", "status": "ok"}
+
+        s, store, runs = _wired(tmp_path, fake_run,
+                                users=_Users(allowed=["alice"]))
+        entry = store.add({"owner": "alice", "prompt": "x", "kind": "once",
+                           "next_fire": time.time() - 1})
+        s.work_store.enqueue_occurrence(entry)
+        store.mark_fired(entry["id"], expected_next_fire=entry["next_fire"])
+        store.remove(entry["id"], "alice")
+
+        await s.dispatch_scheduled_work()
+        assert calls == []
+        row = runs.history(schedule_id=entry["id"])[0]
+        assert row["status"] == "error"
+        assert "deleted before launch" in row["excerpt"]
 
     run(main())

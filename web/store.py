@@ -173,6 +173,51 @@ class ChatStore:
         return {"id": cid, "title": title, "created_at": created, "updated_at": now,
                 "turns": len(turns)}
 
+    def append_scheduled_turn(self, owner: str | None, prompt: str,
+                              turn: dict) -> dict:
+        """Append one scheduled result without replacing concurrent completions.
+
+        The write lock covers chat lookup/create, run_id dedupe, and MAX(idx)+1.
+        A crash after this commit but before outbox acknowledgement is therefore
+        safe: retrying the same run_id is a successful no-op.
+        """
+        run_id = turn.get("run_id")
+        if not run_id:
+            raise ValueError("scheduled chat turn requires run_id")
+        now = _now()
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            chat = conn.execute(
+                "SELECT * FROM chat WHERE owner=? AND title=? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (owner, "⏰ Scheduled runs")).fetchone()
+            cid = chat["id"] if chat else uuid.uuid4().hex
+            created = chat["created_at"] if chat else now
+            if chat is None:
+                conn.execute(
+                    "INSERT INTO chat(id,title,created_at,updated_at,owner) "
+                    "VALUES (?,?,?,?,?)",
+                    (cid, "⏰ Scheduled runs", created, now, owner))
+            duplicate = conn.execute(
+                "SELECT 1 FROM chat_turn WHERE chat_id=? AND run_id=? LIMIT 1",
+                (cid, run_id)).fetchone()
+            if duplicate is None:
+                idx = conn.execute(
+                    "SELECT COALESCE(MAX(idx),-1)+1 AS n FROM chat_turn WHERE chat_id=?",
+                    (cid,)).fetchone()["n"]
+                conn.execute(
+                    "INSERT INTO chat_turn(chat_id,idx,user_message,answer,run_id,"
+                    "status,events,atts,time,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (cid, idx, turn.get("user_message", f"⏰ {prompt}"),
+                     turn.get("answer", ""), run_id, turn.get("status"),
+                     json.dumps(turn.get("events") or []),
+                     json.dumps(turn.get("atts") or []), turn.get("time"), now))
+                conn.execute("UPDATE chat SET updated_at=? WHERE id=?", (now, cid))
+            count = conn.execute("SELECT COUNT(*) AS n FROM chat_turn WHERE chat_id=?",
+                                 (cid,)).fetchone()["n"]
+        return {"id": cid, "title": "⏰ Scheduled runs", "created_at": created,
+                "updated_at": now, "turns": count, "duplicate": bool(duplicate)}
+
     def rename(self, chat_id: str, title: str, owner: str | None = None,
                is_admin: bool = False) -> bool:
         # Legacy owner-NULL rows are shared read-only history: only their owner

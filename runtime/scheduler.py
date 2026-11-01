@@ -199,21 +199,38 @@ class ScheduleStore:
                 continue   # quarantine a malformed hand-edit, don't stall the rest
         return out
 
-    def mark_fired(self, entry_id: str, now: float | None = None) -> None:
+    def mark_fired(self, entry_id: str, now: float | None = None,
+                   expected_next_fire: float | None = None) -> bool:
         """Record a firing: one-shots disable, recurrences advance. 'every'
         advancement is anchored on the SCHEDULED time (not now), so a late
         tick doesn't drift the cadence; skipped-over intervals collapse to
         the next one. 'cron' recomputes from now (absolute wall-clock
         schedule — nothing to drift); a broken cron expression disables the
-        entry instead of stalling the store."""
+        entry instead of stalling the store.
+
+        With expected_next_fire, advancement is a compare-and-set against the
+        due snapshot used for the durable work item. A deleted, disabled, or
+        changed schedule returns False without incrementing fire_count.
+        """
         now = now or time.time()
+        fired = False
         with _STORE_LOCK:
             entries = self._load()
             for e in entries:
                 if e.get("id") != entry_id:
                     continue
+                if expected_next_fire is not None:
+                    try:
+                        expected = (e.get("enabled") and
+                                    float(e.get("next_fire") or 0)
+                                    == float(expected_next_fire))
+                    except (TypeError, ValueError):
+                        expected = False
+                    if not expected:
+                        continue
                 e["fire_count"] = int(e.get("fire_count", 0)) + 1
                 e["last_fired"] = now
+                e["last_occurrence"] = float(e.get("next_fire") or 0)
                 if e.get("kind") == "every" and e.get("every_s"):
                     nxt = float(e["next_fire"]) + int(e["every_s"])
                     while nxt <= now:
@@ -226,7 +243,10 @@ class ScheduleStore:
                         e["enabled"] = False
                 else:
                     e["enabled"] = False
-            self._save(entries)
+                fired = True
+            if fired or expected_next_fire is None:
+                self._save(entries)
+        return fired
 
     def set_enabled(self, entry_id: str, enabled: bool) -> bool:
         """Pause/resume an entry. False when no entry has that id."""
@@ -235,6 +255,12 @@ class ScheduleStore:
             for e in entries:
                 if e.get("id") == entry_id:
                     e["enabled"] = bool(enabled)
+                    if enabled:
+                        e.pop("manual_disabled", None)
+                    else:
+                        # Distinguish a user pause from mark_fired consuming a
+                        # one-shot; the dispatcher revalidates this before launch.
+                        e["manual_disabled"] = True
                     self._save(entries)
                     return True
         return False
