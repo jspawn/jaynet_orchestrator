@@ -31,14 +31,15 @@ message-id evidence). Those plugins are separate binaries
 (`h5i plugin install --from <path>`); browser.browse stays the driving lane.
 Scope discipline: only ever against targets the user authorized.
 
-Config (runtime.yaml → plugins.h5i): binary, timeout_s, allow[], identity,
-model_image_max_pixels. _run_h5i is the subprocess seam — tests monkeypatch
-it, no real h5i runs.
+Config (runtime.yaml → plugins.h5i): binary, timeout_s, allow[], allow_loopback,
+model_image_max_pixels. _run_h5i is the subprocess seam — unit tests monkeypatch
+it; the 0.5.2 replacements also have a real-browser smoke test record.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import shutil
@@ -87,6 +88,45 @@ def _binary(ctx: ToolContext) -> str | None:
     if p:
         return p
     return shutil.which("h5i") or _user_local_bin()
+
+
+# h5i 0.5.2 removed the old extraction verbs. Keep JayNet's tool contract by
+# evaluating small, fixed scripts in the same captured browser session.
+_STRUCTURED_SCRIPT = (
+    "(()=>{const meta={};for(const el of document.querySelectorAll("
+    "'meta[name],meta[property]')){const k=el.getAttribute('property')||"
+    "el.getAttribute('name');if(k)meta[k]=el.content||'';}const json_ld=[];"
+    "for(const el of document.querySelectorAll('script[type=\"application/ld+json\"]'))"
+    "{try{json_ld.push(JSON.parse(el.textContent));}catch(e){json_ld.push(el.textContent);}}"
+    "return {json_ld,meta};})()")
+_MARKDOWN_SCRIPT = "(()=>document.body?document.body.innerText:'')()"
+_TRANSCRIPT_SCRIPT = (
+    r"(async()=>{const urls=[...new Set([...document.querySelectorAll("
+    r"'track[kind=captions],track[kind=subtitles]')].map(t=>t.src).filter(Boolean))];"
+    r"const out=[];for(const url of urls){try{const raw=await(await fetch(url)).text();"
+    r"const text=raw.split(/\r?\n/).filter(l=>l&&!/^(WEBVTT|NOTE|\d+$)/.test(l)"
+    r"&&!l.includes('-->')).join('\n').replace(/<[^>]+>/g,'');out.push({url,text});}"
+    r"catch(e){out.push({url,error:String(e)});}}return out;})()")
+
+
+def _extract_script(raw: str) -> str | None:
+    """Build CSS extraction without evaluating model-supplied JavaScript."""
+    try:
+        spec = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(spec, dict) or not spec or len(spec) > 50:
+        return None
+    for key, selectors in spec.items():
+        if (not isinstance(key, str) or len(key) > 100
+                or not isinstance(selectors, list) or len(selectors) > 50
+                or any(not isinstance(sel, str) or len(sel) > 200 for sel in selectors)):
+            return None
+    encoded = json.dumps(json.dumps(spec, ensure_ascii=False))
+    return ("(()=>{const spec=JSON.parse(" + encoded + ");const out={};"
+            "for(const [key,selectors] of Object.entries(spec)){out[key]=selectors.map("
+            "sel=>Array.from(document.querySelectorAll(sel),"
+            "el=>el.textContent.trim()));}return out;})()")
 
 
 async def _run_h5i(binary: str, args: list[str], timeout_s: int) -> tuple[str | None, str | None]:
@@ -217,7 +257,6 @@ class BrowserBrowse(Tool):
         a = args["action"]
         s = _session(args, ctx)
         cfg_allow = [str(d) for d in (_pcfg(ctx).get("allow") or [])]
-        identity = str(_pcfg(ctx).get("identity") or "").strip()
         if a == "open":
             url = str(args.get("url") or "").strip()
             if not url:
@@ -228,9 +267,11 @@ class BrowserBrowse(Tool):
                 argv += ["--allow", d]
             if args.get("new"):
                 argv.append("--new")
-            # h5i 0.5 opens a capture proxy inherently; --capture was removed.
-            if identity:
-                argv += ["--identity", identity]
+            if not _pcfg(ctx).get("allow_loopback", False):
+                # Also covers redirects/clicks, closing the old direct-URL-only gap.
+                argv.append("--no-loopback")
+            # h5i 0.5 opens a capture proxy inherently; --capture and --identity
+            # were removed upstream.
             # `--` before the model-supplied positional: a url/ref/spec
             # shaped like a flag can't inject into h5i's own parser.
             return argv + ["--", url]
@@ -254,11 +295,10 @@ class BrowserBrowse(Tool):
             return ["browser", "type", "--session", s, "--",
                     ref, str(args.get("text") or "")]
         if a == "submit":
-            argv = ["browser", "submit", "--session", s]
             ref = str(args.get("ref") or "").strip()
             if ref:
-                argv += ["--", ref]
-            return argv
+                return ["browser", "click", "--session", s, "--", ref]
+            return ["browser", "press", "Enter", "--session", s]
         if a == "scroll":
             try:
                 by = int(args.get("by") or 1)
@@ -274,11 +314,14 @@ class BrowserBrowse(Tool):
                 return ["browser", "wait-for", "--text", txt, "--session", s]
             return None
         if a == "extract":
-            spec = str(args.get("spec") or "").strip()
-            return (["browser", "extract", "--session", s, "--", spec]
-                    if spec else None)
-        if a in ("structured", "transcript", "markdown", "requests",
-                 "audit", "status", "close"):
+            script = _extract_script(str(args.get("spec") or "").strip())
+            return (["browser", "eval", "--session", s, "--", script]
+                    if script else None)
+        scripts = {"structured": _STRUCTURED_SCRIPT,
+                   "transcript": _TRANSCRIPT_SCRIPT, "markdown": _MARKDOWN_SCRIPT}
+        if a in scripts:
+            return ["browser", "eval", "--session", s, "--", scripts[a]]
+        if a in ("requests", "audit", "status", "close"):
             return ["browser", a, "--session", s]
         if a == "screenshot":
             # The session name is model-supplied — clamp it before it touches

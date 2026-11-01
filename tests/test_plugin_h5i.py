@@ -79,7 +79,7 @@ def test_configured_binary_and_timeout_used(monkeypatch):
 
 # ---- argv building ----------------------------------------------------------
 
-def test_open_merges_allow_dedups_and_honors_new_and_identity(monkeypatch):
+def test_open_merges_allow_dedups_and_blocks_loopback_by_default(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     r = _exe({"action": "open", "url": "https://docs.rs/x",
               "allow": ["docs.rs"], "new": True})
@@ -89,8 +89,17 @@ def test_open_merges_allow_dedups_and_honors_new_and_identity(monkeypatch):
     assert argv[-2:] == ["--", "https://docs.rs/x"]  # positional behind --
     assert argv.count("--allow") == 1                    # config + call, deduped
     assert "docs.rs" in argv
-    assert "--new" in argv and "--identity" in argv and "privacy" in argv
+    assert "--new" in argv and "--no-loopback" in argv
+    assert "--identity" not in argv                     # removed in h5i 0.5.2
     assert r.result["session"] == "jaynet-req-abcd"      # per-run default
+
+
+def test_open_loopback_requires_explicit_opt_in(monkeypatch):
+    fake = _FakeH5i(monkeypatch)
+    cfg = {"plugins": {"h5i": {"binary": "/fake/h5i", "allow_loopback": True}}}
+    r = _exe({"action": "open", "url": "https://example.com"}, cfg=cfg)
+    assert r.status == "ok"
+    assert "--no-loopback" not in fake.calls[0][1]
 
 
 def test_open_allow_widening_refused(monkeypatch):
@@ -164,7 +173,22 @@ def test_interaction_actions(monkeypatch):
     _exe({"action": "type", "ref": "@e5", "text": "serde"})
     assert fake.calls[1][1][-3:] == ["--", "@e5", "serde"]
     _exe({"action": "extract", "spec": '{"titles": ["h2"]}'})
-    assert fake.calls[2][1][-2:] == ["--", '{"titles": ["h2"]}']
+    argv = fake.calls[2][1]
+    assert argv[:2] == ["browser", "eval"]
+    assert "JSON.parse" in argv[-1] and "h2" in argv[-1]
+
+
+def test_extract_rejects_invalid_or_javascript_specs(monkeypatch):
+    fake = _FakeH5i(monkeypatch)
+    for spec in ("not-json", "[]", '{"x": "h2"}',
+                 '{"x": ["h2;alert(1)"]}', '{"x": ["h2"]};alert(1)'):
+        r = _exe({"action": "extract", "spec": spec})
+        if spec == '{"x": ["h2;alert(1)"]}':
+            assert r.status == "ok"  # inert selector text, never evaluated as JS
+            assert "JSON.parse" in fake.calls[-1][1][-1]
+        else:
+            assert r.status == "error"
+    assert len(fake.calls) == 1
 
 
 def test_missing_args_are_clean_errors(monkeypatch):
@@ -243,9 +267,10 @@ def test_open_capture_is_inherent_in_h5i_0_5(monkeypatch):
 def test_submit_scroll_waitfor(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     _exe({"action": "submit", "ref": "@e7"})
+    assert fake.calls[0][1][:2] == ["browser", "click"]
     assert fake.calls[0][1][-2:] == ["--", "@e7"]
     _exe({"action": "submit"})                       # ref optional
-    assert fake.calls[1][1][:2] == ["browser", "submit"]
+    assert fake.calls[1][1][:3] == ["browser", "press", "Enter"]
     _exe({"action": "scroll", "by": -2})
     assert fake.calls[2][1][:3] == ["browser", "scroll", "-2"]
     _exe({"action": "waitfor", "selector": "#results"})
@@ -261,7 +286,8 @@ def test_structured_transcript_audit(monkeypatch):
     for i, a in enumerate(("structured", "transcript", "audit")):
         r = _exe({"action": a})
         assert r.status == "ok"
-        assert fake.calls[i][1][:2] == ["browser", a]
+        expected = "audit" if a == "audit" else "eval"
+        assert fake.calls[i][1][:2] == ["browser", expected]
         assert "jaynet-req-abcd" in fake.calls[i][1]   # session carried
 
 

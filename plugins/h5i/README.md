@@ -146,6 +146,11 @@ cites a message id. Two rules carry into JayNet unchanged:
    state, `structured` data, traffic capture and audit trails
 4. **browser.pdf** — Chromium, PDFs (h5i has no PDF pipeline)
 
+h5i 0.5.2 removed its `extract`/`structured`/`transcript`/`markdown` and
+`submit` verbs. JayNet keeps the same tool actions by using fixed `browser
+eval` scripts, click, and Enter instead; model-supplied extraction specs are
+validated as JSON, never evaluated as JavaScript.
+
 ## Config (runtime.yaml, all optional)
 
 ```yaml
@@ -156,7 +161,8 @@ plugins:
     timeout_s: 90          # per CLI call (1-300)
     allow: [docs.rs]       # domains passed as --allow on every open; once set,
                            # per-call allow may only narrow this list
-    identity: ""           # e.g. "privacy" or "firefox-143-linux"
+    allow_loopback: false  # false adds --no-loopback for followed links/redirects;
+                           # JayNet still refuses direct loopback URLs itself
     model_image_max_pixels: 2000000   # screenshot return_image budget
 ```
 

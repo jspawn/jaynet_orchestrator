@@ -11,9 +11,9 @@
 # Complements the Chromium lane (kept for full-page screenshots and PDFs) —
 # h5i has no PDF pipeline.
 name: h5i
-version: 0.3.0
+version: 0.3.1
 description: >-
-  The h5i red-team browser (h5i 0.5 via agent-browser): browser.browse —
+  The h5i red-team browser (h5i 0.5.2+ via agent-browser): browser.browse —
   open/snapshot/click/type/submit/scroll/
   waitfor/extract/structured/transcript/markdown/screenshot with domain
   allowlists and an auditable traffic log (capture → requests/audit).
