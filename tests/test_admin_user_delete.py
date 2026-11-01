@@ -56,11 +56,18 @@ def _wire_owner_state(app, tmp_path):
     conn.close()
 
     store = ScheduleStore(sched_path)
-    work = WorkStore(app.state.runtime.config["web"]["chats_db"])
+    chats_db = app.state.runtime.config["web"]["chats_db"]
+    work = WorkStore(chats_db)
+    from runtime.trigger_store import TriggerStore
+    triggers = TriggerStore(chats_db)
     for owner in ("eve", "bob"):
         entry = store.add({"owner": owner, "prompt": f"{owner} job", "kind": "once",
                            "next_fire": time.time() + 3600})
         work.enqueue_occurrence(entry)
+        triggers.record_poll(entry | {"source": "arxiv", "rule_version": "v1",
+                                     "prompt_version": 1, "tool_scope": [],
+                                     "budget": {}, "query": "q"},
+                             [{"id": f"{owner}-v1"}], entry["next_fire"])
 
     tr = Trace(app.state.runtime.config["trace"]["db_path"])
     for owner in ("eve", "bob"):
@@ -90,6 +97,7 @@ async def test_delete_user_removes_schedules_knowledge_and_traces(
     removed = r.json()["state_removed"]
     assert removed["schedules"] == 1
     assert removed["work_items"] == 1
+    assert removed["trigger_events"] == 1
     assert removed["memory"] == 1
     assert removed["kg"] == 1
     assert removed["rag"] == 1
@@ -103,6 +111,11 @@ async def test_delete_user_removes_schedules_knowledge_and_traces(
     # eve's schedule is gone — nothing left for the tick to fire — while
     # bob's entry is untouched.
     assert [e["owner"] for e in store.list()] == ["bob"]
+    conn = sqlite3.connect(app.state.runtime.config["web"]["chats_db"])
+    assert [r[0] for r in conn.execute(
+        "SELECT owner FROM trigger_events")] == ["bob"]
+    assert conn.execute("SELECT COUNT(*) FROM trigger_decisions").fetchone()[0] == 1
+    conn.close()
 
     conn = sqlite3.connect(memory_db)
     assert [r[0] for r in conn.execute(

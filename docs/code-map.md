@@ -92,6 +92,7 @@ Handoffs: `skills.md`, `chains.md`, `plugins.md`, `connectors.md` in `handoffs/`
 | `web/routes_run.py` | Chat send + SSE stream, slash commands, `/goal`, voice. |
 | `web/routes_chats.py` | Saved chats, current chat, flags. |
 | `web/scheduler_runtime.py` | Scheduled-prompt dispatcher: launch-time gate revalidation, startup recovery, no-overlap ticks, and outbox delivery. |
+| `web/trigger_runtime.py` · `runtime/trigger_store.py` | Fail-closed arXiv observe polling; immutable trigger events and deterministic decisions, never agent work. |
 | `web/routes_admin.py` | `/api/admin/*` — config, presets/slots, backup, HF downloader, services. |
 | `web/routes_studio.py` | Studio authoring (skills/chains/tools/evals) + jaypack. |
 | `web/routes_eval.py` | `/api/admin/evals/*` + flag→make-test. |
@@ -137,13 +138,13 @@ Docs: [testing-harness.md](testing-harness.md).
 | trace.db | `runtime/trace.py` |
 | eval.db | `runtime/eval_store.py` |
 | presets.db (presets, slots, cloud models, brain overlay versions) | `runtime/preset_store.py`, `runtime/cloud_store.py`, `runtime/brain_overlays.py` |
-| chats.db (chats, flags, reports, schedule history, durable work/attempts/outbox) | `web/store.py`, `runtime/work_store.py` |
+| chats.db (chats, flags, reports, schedule history, durable work/attempts/outbox, trigger decisions) | `web/store.py`, `runtime/work_store.py`, `runtime/trigger_store.py` |
 | users.db (users, sessions, goals) | `web/auth.py` |
 | Persistent agent memory (SQLite FTS5) | `tools/memory/store.py` |
 | Working notes | `tools/agent/note.py` |
 | Todos (per-run) + acceptance ledger (`ledger.json`) | `runtime/todos.py` + `tools/agent/todos.py` (checks run in `runtime/dispatch_guards.py` via `runtime/verify.py`) |
 | Projects | `web/projects.py` |
-| Scheduler | `runtime/scheduler.py`, `runtime/work_store.py`, `web/scheduler_runtime.py` |
+| Scheduler | `runtime/scheduler.py`, `runtime/work_store.py`, `runtime/trigger_store.py`, `web/scheduler_runtime.py`, `web/trigger_runtime.py` |
 | KG / RAG / research | `tools/kg/graph.py`, `tools/rag/store.py`, `tools/research/loop.py` |
 
 ## Scripts

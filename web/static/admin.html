@@ -1064,10 +1064,15 @@
   <section id="schedForm">
     <h2>New schedule</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Fire a prompt as a chat run for a user — once at a given time, on an interval,
-      or on a cron schedule (5 fields, local time).</p>
+      Run a prompt once, on an interval, or on a cron schedule (local time).
+      An arXiv watch only records new papers and versions — no agent run, tools,
+      or chat delivery. Its query leaves this machine for arXiv.</p>
     <div class="row">
       <select id="schedOwner" title="run as user"></select>
+      <select id="schedSource" title="prompt run or observe-only arXiv watch">
+        <option value="">prompt run</option>
+        <option value="arxiv">arXiv watch (observe only)</option>
+      </select>
       <select id="schedKind">
         <option value="once">once</option>
         <option value="every">every</option>
@@ -1080,7 +1085,9 @@
       <button class="primary" id="schedAdd">Add</button>
       <span class="note" id="schedNote"></span>
     </div>
-    <textarea id="schedPrompt" placeholder="prompt to run…" style="margin-top:10px"></textarea>
+    <input id="schedQuery" placeholder="arXiv query, e.g. cat:cs.LG AND abs:diffusion"
+      style="display:none;width:100%;margin-top:10px">
+    <textarea id="schedPrompt" placeholder="prompt to run (for a watch: future task, currently inert)…" style="margin-top:10px"></textarea>
   </section>
   <section>
     <h2>Schedules <button id="refreshSchedules" style="float:right;font-weight:600">Refresh</button></h2>
@@ -1141,7 +1148,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=18"></script>
+<script src="/static/admin.js?v=19"></script>
 
 </body>
 </html>

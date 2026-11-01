@@ -1370,13 +1370,21 @@ async function presetMeasure(name){
 }
 $("#refreshPresets").onclick=loadPresets;
 
-// ---- prompt schedules ----
+// ---- prompt schedules and observe-only source watches ----
 let _schedules=null, _schedUsers=null;
 const SCHED_WHEN={once:{lbl:"at",ph:"e.g. +30m or 2026-10-20T09:00"},
   every:{lbl:"every",ph:"e.g. 6h"},cron:{lbl:"cron",ph:"e.g. 30 7 * * 1-5"}};
 function schedWhenSync(){
+  const watching=$("#schedSource").value==="arxiv";
+  if(watching) $("#schedKind").value="every";
+  $("#schedKind").disabled=watching;
   const m=SCHED_WHEN[$("#schedKind").value]||SCHED_WHEN.once;
-  $("#schedWhenLbl").textContent=m.lbl; $("#schedWhen").placeholder=m.ph;
+  $("#schedWhenLbl").textContent=m.lbl;
+  $("#schedWhen").placeholder=watching?"15m or longer":m.ph;
+}
+function schedSourceSync(){
+  $("#schedQuery").style.display=$("#schedSource").value==="arxiv"?"block":"none";
+  schedWhenSync();
 }
 function _fmtIso(ts){
   if(!ts) return "—";
@@ -1397,7 +1405,7 @@ async function loadSchedules(){
   const j=await (await api("/api/admin/schedules")).json();
   _schedules=j.schedules||[];
   $("#schedRows").innerHTML=_schedules.map(s=>{
-    const pr=String(s.prompt||"");
+    const pr=String(s.mode==="observe"?"arXiv: "+(s.query||"")+" — "+(s.prompt||""):s.prompt||"");
     const last=s.last_status
       ?"<span class='pill st "+(s.last_status==="ok"?"up":"down")+"'>"+esc(s.last_status)+"</span>"
       :"<span class='pill'>—</span>";
@@ -1431,8 +1439,7 @@ async function loadSchedHistory(id,tr){
   document.querySelectorAll(".schedHistRow").forEach(r=>r.remove());
   if(wasOpen) return;   // clicking an open row's button just closes it
   const j=await (await api("/api/admin/schedules/"+id+"/history")).json();
-  const hr=document.createElement("tr"); hr.className="schedHistRow";
-  hr.innerHTML="<td colspan='9'>"+((j.runs||[]).map(r=>
+  const runs=(j.runs||[]).map(r=>
     "<div class='schedRun'>"+
     "<span class='pill st "+(r.status==="ok"?"up":"down")+"'>"+esc(r.status||"?")+"</span> "+
     "<span class='muted'>"+_fmtTs(r.fired_at)+"</span>"+
@@ -1445,7 +1452,21 @@ async function loadSchedHistory(id,tr){
     ((r.work_error||r.delivery_error)?"<div class='muted' style='font-size:12px'>"+
       esc(r.work_error||r.delivery_error)+"</div>":"")+
     "<div class='muted' style='font-size:12px'>"+esc(String(r.excerpt||"").slice(0,200))+"</div></div>"
-  ).join("")||"<span class='muted'>no runs yet</span>")+"</td>";
+  ).join("");
+  const decisions=(j.decisions||[]).map(d=>
+    "<div class='schedRun'><span class='pill st "+(d.outcome==="would_accept"?"up":"")+"'>"+
+    esc(d.outcome)+"</span> <b>"+esc(d.external_id)+"</b> "+
+    "<span class='muted'>"+_fmtTs(d.decided_at)+"</span>"+
+    "<div>"+esc((d.payload||{}).title||"untitled")+"</div>"+
+    "<div class='muted' style='font-size:12px' title='mandate "+esc(d.mandate_hash)+"'>"+
+    esc(d.reason)+" · rule "+esc(d.rule_version)+" · prompt v"+d.prompt_version+
+    " · mandate "+esc(String(d.mandate_hash||"").slice(0,12))+"</div></div>").join("");
+  const body=j.decisions!==undefined
+    ?"<div class='muted' style='font-size:12px;margin-bottom:6px'>Observation only: decisions never launch an agent, tools, or chat delivery.</div>"+
+      (decisions||"<span class='muted'>no observations yet</span>")
+    :(runs||"<span class='muted'>no runs yet</span>");
+  const hr=document.createElement("tr"); hr.className="schedHistRow";
+  hr.innerHTML="<td colspan='9'>"+body+"</td>";
   tr.after(hr);
 }
 async function loadSchedUsers(){
@@ -1466,19 +1487,22 @@ async function loadSchedProjects(){
 $("#refreshSchedules").onclick=loadSchedules;
 $("#schedOwner").onchange=loadSchedProjects;
 $("#schedKind").onchange=schedWhenSync;
+$("#schedSource").onchange=schedSourceSync;
 $("#schedAdd").onclick=async()=>{
   const kind=$("#schedKind").value, sched=$("#schedWhen").value.trim();
   const body={owner:$("#schedOwner").value,prompt:$("#schedPrompt").value.trim(),
     kind:kind,enabled:$("#schedEnabled").checked};
   if(kind==="once") body.when=sched; else if(kind==="every") body.every=sched; else body.cron=sched;
   if($("#schedProject").value) body.project_id=$("#schedProject").value;
-  if(!body.owner||!body.prompt||!sched){ note($("#schedNote"),"owner, prompt and schedule required",false); return; }
+  if($("#schedSource").value){ body.source=$("#schedSource").value; body.query=$("#schedQuery").value.trim(); }
+  if(!body.owner||!body.prompt||!sched||(body.source&&!body.query)){
+    note($("#schedNote"),"owner, prompt, schedule and watch query required",false); return; }
   const r=await api("/api/admin/schedules",{method:"POST",
     headers:{"content-type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({}));
   if(!r.ok){ note($("#schedNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
   note($("#schedNote"),"added",true);
-  $("#schedPrompt").value=""; $("#schedWhen").value="";
+  $("#schedPrompt").value=""; $("#schedWhen").value=""; $("#schedQuery").value="";
   loadSchedules();
 };
 

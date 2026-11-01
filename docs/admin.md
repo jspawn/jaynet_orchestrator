@@ -630,12 +630,19 @@ with a full management view here.
   The prompt is the whole payload: the brain can call connectors, chains
   (`chain.run`), and tools inside the run, so "pull X via connector, reshape
   with chain Y, write the file" is one prompt.
+- **ArXiv watch (observe only)** — poll a fixed arXiv query every 15 minutes
+  or longer. The first non-empty poll records a baseline; later unseen
+  versioned paper IDs record `would_accept` decisions with rule/prompt
+  versions and a mandate hash. Watches never launch an agent, execute the
+  stored future prompt/tool scope, or append chat. The query leaves the box
+  for arXiv; results are untrusted metadata, not instructions.
 - **Schedules table** — every entry from every user: enabled toggle, next
   fire, last run status pill, fire count, delete. **History** expands a row
   with the last 50 firings (status, duration, excerpt, tokens), plus work and
-  attempt state, scheduled occurrence, delivery state, and recovery errors.
-  The full answer lands in the owner's "⏰ Scheduled runs" chat. Disabling or
-  deleting cancels queued work but never kills a run already in flight.
+  attempt state, scheduled occurrence, delivery state, and recovery errors;
+  watch history shows observation decisions instead. The full answer lands in
+  the owner's "⏰ Scheduled runs" chat. Disabling or deleting cancels queued
+  work but never kills a run already in flight.
 - Fired runs carry the owner's role: an admin's schedule auto-confirms gated
   tools (config `tools.schedule.auto_confirm`), a non-admin's never does.
   Revoking a user's schedules flag auto-disables the entries they created

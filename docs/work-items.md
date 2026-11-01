@@ -1,6 +1,6 @@
 # Durable work items and outbox
 
-*Design and implementation record — phase 1 is implemented for scheduled prompts.*
+*Design and implementation record — phase 1 (scheduled prompts) and phase 2 (observe-only arXiv watches) are implemented.*
 
 Inspired by DeepSeek's [dsh-superagent prototype](https://github.com/deepseek-ai/dsh-superagent-prototype),
 adapted to JayNet rather than ported. The useful ideas are durable authorized
@@ -199,14 +199,37 @@ audit, not a queue.
    before/after launch, after model completion, and between chat apply/effect
    acknowledgement.
 
-## Later phases, only after phase 1 proves itself
+## Phase 2 implementation record: observe-only arXiv watches
 
-- **Phase 2 — observe-mode triggers:** immutable trigger + decision records;
-  deterministic source/actor gates; recorded would-accept decisions before any
-  autonomous work. A mandate stores source, owner, project, rule/prompt version,
-  tool scope, and budget, and is revalidated on resume.
+An admin can attach `source: arxiv` and a query to a recurring schedule. The
+server fixes `mode: observe`, rule/prompt versions, read-only tool scope, and a
+budget snapshot; the client cannot supply them. The existing schedule supplies
+owner, project, future prompt, recurrence, and enabled state.
+
+`web/trigger_runtime.py` revalidates owner, project, schedule permission,
+source, interval, rule/prompt versions, tool availability/global disable state,
+and current budget ceilings before fetching and again before recording. Polls
+use only the registered read-only `arxiv.search` tool (20 results, last-updated
+order). A pause, deletion, or mandate change during the fetch records nothing.
+
+`runtime/trigger_store.py` adds `trigger_events` and `trigger_decisions` to
+`chats.db`. A unique `(source_id, external_id)` dedupes versioned paper IDs.
+The first successful non-empty poll records `baseline`; later unseen versions
+record `would_accept`. Each immutable decision carries its reason, versions,
+occurrence, and mandate hash. History is capped at 50 API rows, and owner
+cleanup cascades decisions. Source errors advance recurrence to avoid hot-looping.
+
+There is deliberately **no code path from a decision to `WorkStore`**.
+Observation never invokes `runtime.run`, creates work/attempts/effects, executes
+the future prompt or tool scope, or appends chat. The existing Admin → Schedules
+history surface displays decisions; no new tab was added.
+
+## Later phases
+
 - **Phase 3 — selected external effects:** adapter-specific idempotency and
   reconciliation for named connector/report destinations. Never globally wrap
   `AgentRuntime._execute_tool()` and blindly replay arbitrary side effects.
 - **Phase 4 — shared supervision:** evaluate migrating goals and other durable
   workflows; add human-priority scheduling only when a shared queue exists.
+  Any future auto mode must link work to an immutable decision and revalidate
+  its mandate before enqueue and launch; source text remains untrusted data.

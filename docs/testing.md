@@ -120,6 +120,7 @@ Fixtures (`tests/conftest.py`):
 | `test_ops.py` | ops.run allowlist + metachar rejection |
 | `test_scheduler.py` · `test_job_wait.py` | schedule.* parsing/store/scoping; conditional occurrence advancement; job.wait poll exemption |
 | `test_work_store.py` · `test_scheduled_chat.py` · `test_scheduler_web.py` | durable work transitions, crash recovery, no-overlap dispatch, idempotent chat outbox, concurrent completion safety |
+| `test_trigger_store.py` · observe tests in `test_scheduler_web.py` | baseline/would-accept dedupe, immutable decisions, source/actor gates, pause-during-fetch, and proof that observation creates no agent work |
 | `test_trace_mine.py` | trace.mine sequence extraction + safety flags |
 
 ### Eval harness & gate prompt

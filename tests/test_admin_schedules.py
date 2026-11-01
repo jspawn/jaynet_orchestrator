@@ -174,6 +174,53 @@ async def test_disable_and_delete_cancel_queued_work(tmp_path, web_app, web_clie
     assert work.history(deleted["id"])[0]["status"] == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_observe_watch_has_server_fixed_mandate_and_decision_history(
+        tmp_path, web_app, web_client):
+    from runtime.trigger_store import TriggerStore
+    app = web_app()
+    app.state.users.create("alice", "alicepass")
+    _point_store(app, tmp_path)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/schedules", json={
+            "owner": "alice", "prompt": "summarize future matches",
+            "kind": "every", "every": "15m", "source": "arxiv",
+            "query": "cat:cs.LG", "tool_scope": ["ops.run"],
+            "budget": {"max_iterations": 9999}})
+        assert r.status_code == 200
+        entry = r.json()["schedule"]
+        assert entry["mode"] == "observe" and entry["source"] == "arxiv"
+        assert entry["rule_version"] == "arxiv-new-version-v1"
+        assert entry["prompt_version"] == 1
+        assert entry["tool_scope"] == ["arxiv.search", "arxiv.get"]
+        assert entry["budget"]["max_iterations"] == 12
+        triggers = TriggerStore(app.state.runtime.config["web"]["chats_db"])
+        triggers.record_poll(entry, [{"id": "2301.12345v1", "title": "Paper"}],
+                             entry["next_fire"])
+        history = (await c.get(
+            f"/api/admin/schedules/{entry['id']}/history")).json()
+        assert history["runs"] == []
+        assert history["decisions"][0]["outcome"] == "baseline"
+        assert history["decisions"][0]["payload"]["title"] == "Paper"
+
+
+@pytest.mark.asyncio
+async def test_observe_watch_validation(tmp_path, web_app, web_client):
+    app = web_app()
+    app.state.users.create("alice", "alicepass")
+    _point_store(app, tmp_path)
+    base = {"owner": "alice", "prompt": "future task", "kind": "every",
+            "every": "15m", "source": "arxiv", "query": "cat:cs.LG"}
+    bad = [base | {"source": "https://example.com"},
+           base | {"kind": "once", "when": "+1h"},
+           base | {"every": "14m"}, base | {"query": " "}]
+    async with web_client(app) as c:
+        for body in bad:
+            r = await c.post("/api/admin/schedules", json=body)
+            assert r.status_code == 400, (body, r.text)
+            assert r.json()["detail"]
+
+
 # ---- per-user flag endpoint ------------------------------------------------------
 @pytest.mark.asyncio
 async def test_user_schedules_flag_endpoint(tmp_path, web_app, web_client):

@@ -365,3 +365,124 @@ def test_deleted_schedule_is_revalidated_before_launch(tmp_path):
         assert "deleted before launch" in row["excerpt"]
 
     run(main())
+
+
+# ---- observe-only arXiv triggers ---------------------------------------------
+class _ArxivTool:
+    read_only = True
+    admin_only = False
+
+    def __init__(self, papers=(), error=None, during=None):
+        self.papers = list(papers)
+        self.error = error
+        self.during = during
+        self.calls = []
+
+    async def execute(self, args, ctx):
+        from runtime.tool_base import ToolResult
+        self.calls.append(args)
+        if self.during:
+            self.during()
+        if self.error:
+            return ToolResult(status="error", result=None, error=self.error)
+        return ToolResult(status="ok", result={"papers": self.papers})
+
+
+def _observe_entry(store, **overrides):
+    from web.trigger_runtime import observe_mandate
+    entry = {"owner": "alice", "prompt": "summarize the new paper",
+             "kind": "every", "every_s": 900, "next_fire": time.time() - 1,
+             "query": "cat:cs.LG", "created_by": "admin"}
+    entry.update(observe_mandate(entry))
+    entry.update(overrides)
+    return store.add(entry)
+
+
+def _attach_arxiv(s, tool):
+    s.runtime.registry = SimpleNamespace(
+        get=lambda name: tool if name in ("arxiv.search", "arxiv.get") else None)
+
+
+def test_observe_tick_records_decision_without_agent_work_or_chat(tmp_path):
+    async def main():
+        import sqlite3
+        calls = []
+
+        async def fake_run(msg, **kw):
+            calls.append(kw)
+            return {"answer": "must not run", "status": "ok"}
+
+        s, store, _ = _wired(tmp_path, fake_run,
+                             users=_Users(allowed=["alice"]))
+        tool = _ArxivTool([{"id": "2301.12345v1", "title": "Paper"}])
+        _attach_arxiv(s, tool)
+        entry = _observe_entry(store)
+        old_fire = entry["next_fire"]
+        await s.scheduler_tick()
+        rows = s.trigger_store.history(entry["id"])
+        assert len(rows) == 1 and rows[0]["outcome"] == "baseline"
+        assert rows[0]["external_id"] == "2301.12345v1"
+        assert tool.calls[0]["sort_by"] == "lastUpdatedDate"
+        assert tool.calls[0]["max_results"] == 20
+        assert calls == [] and s.chats.upserts == []
+        assert store.list()[0]["next_fire"] > old_fire
+        assert store.list()[0]["last_status"] == "ok"
+        with sqlite3.connect(s.chats.db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM work_items").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM work_attempts").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM work_effects").fetchone()[0] == 0
+
+    run(main())
+
+
+def test_observe_disabled_source_gate_fails_closed_without_fetch(tmp_path):
+    async def main():
+        class DisabledUsers(_Users):
+            def get_global_disabled_tools(self):
+                return {"arxiv.search"}
+
+        s, store, _ = _wired(tmp_path, lambda msg, **kw: None,
+                             users=DisabledUsers(allowed=["alice"]))
+        tool = _ArxivTool([{"id": "2301.12345v1"}])
+        _attach_arxiv(s, tool)
+        entry = _observe_entry(store)
+        old_fire = entry["next_fire"]
+        await s.scheduler_tick()
+        assert tool.calls == []
+        assert s.trigger_store.history(entry["id"]) == []
+        assert store.list()[0]["next_fire"] > old_fire  # no 30-second hot loop
+        assert store.list()[0]["last_status"] == "error"
+
+    run(main())
+
+
+def test_observe_pause_during_fetch_records_nothing(tmp_path):
+    async def main():
+        s, store, _ = _wired(tmp_path, lambda msg, **kw: None,
+                             users=_Users(allowed=["alice"]))
+        entry = _observe_entry(store)
+        tool = _ArxivTool([{"id": "2301.12345v1"}],
+                          during=lambda: store.set_enabled(entry["id"], False))
+        _attach_arxiv(s, tool)
+        await s.scheduler_tick()
+        assert s.trigger_store.history(entry["id"]) == []
+        assert store.list()[0]["enabled"] is False
+        assert store.list()[0]["fire_count"] == 0
+
+    run(main())
+
+
+def test_observe_source_error_advances_without_recording(tmp_path):
+    async def main():
+        s, store, _ = _wired(tmp_path, lambda msg, **kw: None,
+                             users=_Users(allowed=["alice"]))
+        tool = _ArxivTool(error="upstream unavailable")
+        _attach_arxiv(s, tool)
+        entry = _observe_entry(store)
+        old_fire = entry["next_fire"]
+        await s.scheduler_tick()
+        assert s.trigger_store.history(entry["id"]) == []
+        assert store.list()[0]["next_fire"] > old_fire
+        assert store.list()[0]["last_status"] == "error"
+
+    run(main())

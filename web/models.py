@@ -267,12 +267,14 @@ class EvalScheduleRequest(BaseModel):
 
 class ScheduleCreateRequest(BaseModel):
     owner: str                               # the account the run fires as
-    prompt: str                              # the standalone task to run
+    prompt: str                              # standalone task (inert for observe mode)
     kind: str                                # once | every | cron
     when: str | None = None                  # kind=once: '+30m' or ISO-8601
     every: str | None = None                 # kind=every: '30m', '2h', '1d', '1w'
     cron: str | None = None                  # kind=cron: 5-field local-time cron
     project_id: str | None = None            # run inside this project's files
+    source: str | None = None                # arxiv = observe-only source watch
+    query: str | None = None                 # fixed-source query, never a URL
     enabled: bool = True
 
 

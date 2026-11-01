@@ -12,6 +12,7 @@ from runtime.work_store import WorkStore
 from web import projects as PJ
 from web.routes_run import _schedule_tool_gate
 from web.store import ScheduleRunStore
+from web.trigger_runtime import ArxivObserver
 
 
 def _sched_runs_db(s, chats) -> str:
@@ -99,8 +100,10 @@ class ScheduledRunner:
             self.config.get("store", str(_paths.DATA / "schedules.json")))
         self.runs = ScheduleRunStore(_sched_runs_db(s, s.chats))
         self.work = WorkStore(self.runs.db_path)
+        self.observer = ArxivObserver(self)
         self.orphan_logged: set[str] = set()
         s.work_store = self.work
+        s.trigger_store = self.observer.store
         s.scheduler_tick = self.tick
         s.dispatch_scheduled_work = self.dispatch_attempts
         s.deliver_scheduled_effects = self.deliver_effects
@@ -241,6 +244,14 @@ class ScheduledRunner:
         for entry in _drop_revoked(self.runs, self.schedules, self.users, due):
             sid = str(entry.get("id"))
             occurrence = float(entry["next_fire"])
+            if entry.get("mode") == "observe":
+                observed = await self.observer.poll(entry)
+                if observed.get("error"):
+                    print(f"[scheduler] observe {sid}: {observed['error']}")
+                if observed["advance"] and self.schedules.mark_fired(
+                        sid, expected_next_fire=occurrence):
+                    self.schedules.set_status(sid, observed["status"])
+                continue
             queued = self.work.enqueue_occurrence(entry, occurrence)
             if queued["outcome"] == "active":
                 continue                    # durable no-overlap guard
