@@ -82,20 +82,50 @@ def ram_usage(pids: list[int], proc_root: str | Path = "/proc") -> dict:
             "processes": len(pids), "readable_processes": readable}
 
 
-def parse_rocm_pids(raw: str) -> dict[int, dict[str, int]]:
-    """Parse ``rocm-smi --showpids``: pid → GPU → bytes."""
-    out: dict[int, dict[str, int]] = {}
+def _rocm_memory(raw: str) -> dict[int, int]:
+    """PID → total VRAM bytes from ``rocm-smi --showpids``."""
+    out = {}
     for line in raw.splitlines():
         parts = line.split()
         if len(parts) < 4 or not parts[0].isdigit():
             continue
         try:
-            pid, used = int(parts[0]), int(parts[3])
-            cards = [str(int(g)) for g in parts[2].split(",")]
+            out[int(parts[0])] = int(parts[3])
         except ValueError:
             continue
-        for card in cards:
-            out.setdefault(pid, {})[card] = used
+    return out
+
+
+def parse_rocm_pid_gpus(raw: str) -> dict[int, list[str]]:
+    """PID → DRM card indices from ``rocm-smi --showpidgpus``.
+
+    The GPU(s) column in --showpids is a COUNT, not an index (on a two-card
+    box both single-card processes report 1), so it must never be used for
+    placement.
+    """
+    out: dict[int, list[str]] = {}
+    current: int | None = None
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "PID" and parts[1].isdigit():
+            current = int(parts[1])
+            out.setdefault(current, [])
+        elif current is not None and len(parts) == 1 and parts[0].isdigit():
+            out[current].append(parts[0])
+    return out
+
+
+def parse_rocm_pids(raw: str, gpu_map: dict[int, list[str]]) -> dict[int, dict[str, int]]:
+    """PID → GPU → bytes for single-card processes.
+
+    rocm-smi reports only a process's COMBINED VRAM when it spans cards;
+    duplicating that total onto every card would be false attribution.
+    """
+    out: dict[int, dict[str, int]] = {}
+    for pid, used in _rocm_memory(raw).items():
+        cards = gpu_map.get(pid) or []
+        if len(cards) == 1:
+            out[pid] = {cards[0]: used}
     return out
 
 
@@ -151,7 +181,19 @@ def process_vram(config: dict) -> tuple[dict[int, dict[str, int]], str, list[str
         if error:
             warnings.append(error)
         else:
-            by_pid = parse_rocm_pids(raw)
+            memory = _rocm_memory(raw)
+            gpu_map: dict[int, list[str]] = {}
+            if memory:
+                cards_raw, cards_error = _smi_output(
+                    [rocm, "--showpidgpus", *(str(pid) for pid in memory)])
+                if cards_error:
+                    warnings.append(cards_error)
+                else:
+                    gpu_map = parse_rocm_pid_gpus(cards_raw)
+            by_pid = parse_rocm_pids(raw, gpu_map)
+            if any(len(gpu_map.get(pid) or []) > 1 for pid in memory):
+                warnings.append("rocm-smi cannot split a multi-GPU process's "
+                                "combined VRAM per card")
             sources.append("rocm-smi")
     nvidia = _resolve("nvidia-smi", ctx)
     if nvidia:

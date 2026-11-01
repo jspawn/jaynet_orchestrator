@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from runtime.env import env as _env
+
 
 def parse_preset(path: str | Path) -> dict[str, str]:
     """Parse a KEY=VALUE preset file into a dict. Missing file -> {}.
@@ -21,12 +23,19 @@ def parse_preset(path: str | Path) -> dict[str, str]:
     p = Path(path)
     if not p.is_file():
         return data
+    # start-model.sh accepts either model-root spelling even when only
+    # JAYNET_MODELS is set. Mirror that here; plain expandvars would erase
+    # $ORCH_MODELS and make every artifact path look missing.
+    models = _env("ORCH_MODELS") or ""
     for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        data[key.strip()] = os.path.expanduser(os.path.expandvars(val.strip()))
+        val = val.strip()
+        for name in ("ORCH_MODELS", "JAYNET_MODELS"):
+            val = val.replace("${" + name + "}", models).replace("$" + name, models)
+        data[key.strip()] = os.path.expanduser(os.path.expandvars(val))
     return data
 
 
