@@ -52,7 +52,15 @@ trace.
 
 The managed model servers as cards: live state, VRAM, start / stop /
 restart, and an auto-refreshing log tail per server. Model crashes show up
-here in red with their last lines. The **binaries** panel registers the
+here in red with their last lines. While a local preset is running, **usage**
+opens an on-demand detail panel for the actual boot or strength-swapped
+preset: host RAM (proportional set size across the server process tree),
+per-process VRAM and whole-card used/total per GPU, plus model/projector/
+draft artifact sizes and free space on their filesystems. Disk figures cover
+preset artifacts, not runtime/KV caches; unavailable vendor attribution is
+shown as unknown rather than zero. Opening or refreshing this panel probes
+`/proc` and the GPU tools — the normal three-second status poll does not.
+The **binaries** panel registers the
 server builds presets launch from (path, device env such as
 `HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **type** dropdown
 (`llama` default, `vllm`, `radiance` — picks the launch backend, see

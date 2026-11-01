@@ -53,6 +53,41 @@ def _run_outcome(out) -> tuple[str, str, int | None]:
             out.get("total_tokens"))
 
 
+def _usage_target(runtime, name: str, status: dict,
+                  occupant: dict | None) -> tuple[int, str, dict]:
+    """(pid, actual preset name, preset config) for a live local slot."""
+    from runtime.preset_store import resolve_slot, slot_preset_name
+
+    if status.get("alive"):
+        pid = status.get("pid")
+        preset_name = slot_preset_name(runtime.config, name) or name
+        preset = resolve_slot(runtime.config, name)
+    elif occupant:
+        pid = occupant.get("pid")
+        preset_name = str(occupant.get("model") or "custom")
+        preset = (((runtime.config.get("models") or {}).get("presets") or {})
+                  .get(preset_name) or {})
+    else:
+        raise HTTPException(409, f"{name}: no running local preset")
+    if not pid:
+        raise HTTPException(409, f"{name}: server pid is unavailable")
+    return int(pid), preset_name, preset
+
+
+async def _read_usage(pid: int, preset: dict, config: dict) -> dict:
+    from runtime import model_usage
+    try:
+        return await asyncio.to_thread(
+            model_usage.collect_usage, pid, preset, config)
+    except Exception as exc:
+        # A diagnostic panel should still show its identity when one probe
+        # fails; the warning says why the numeric fields are empty.
+        return {"pid": pid, "ram": {"used_gib": None}, "vram": [],
+                "vram_source": None,
+                "disk": {"artifacts": [], "mounts": [], "total_gib": 0},
+                "warnings": [f"usage probe failed: {type(exc).__name__}: {exc}"]}
+
+
 def _record_run(sched_runs, sched_store, entry: dict, run_id: str | None,
                 status: str, duration_s: float | None, excerpt: str,
                 tokens: int | None) -> None:
@@ -487,6 +522,24 @@ def register(app, s):
                           "stats": await _proc_stats(name, serving)}
         pairs = await asyncio.gather(*(_enrich(i) for i in data.items()))
         return dict(pairs)
+
+    @app.get("/api/admin/processes/{name}/usage")
+    async def admin_process_usage(name: str):
+        """On-demand live resources for the preset actually serving this slot.
+
+        Deliberately separate from the 3-second process poll: /proc walks,
+        vendor SMI calls and artifact sizes are comparatively expensive.
+        """
+        if name not in proc_mgr.names():
+            raise HTTPException(404, f"unknown process: {name}")
+        if _slot_remote(name):
+            raise HTTPException(409, f"{name}: remote preset — local RAM, VRAM "
+                                     "and disk usage are unavailable")
+        st = proc_mgr.status().get(name) or {}
+        occ = None if st.get("alive") else _slot_occupant(name)
+        pid, preset_name, preset = _usage_target(runtime, name, st, occ)
+        usage = await _read_usage(pid, preset, runtime.config)
+        return {"slot": name, "preset": preset_name, "swapped": bool(occ), **usage}
 
     @app.get("/api/admin/processes/{name}/logs")
     async def admin_process_logs(name: str, lines: int = 200):

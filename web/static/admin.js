@@ -1636,6 +1636,7 @@ loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadUpdates(); loadHardwa
 // ---- managed processes ----
 let _procTimer = null;
 let _procExpanded = new Set();
+let _usageExpanded = new Set();
 async function loadProcs(){
   try {
     const d = await (await api("/api/admin/processes")).json();
@@ -1673,9 +1674,11 @@ function renderProcs(data){
           <button class="mini" data-act="restart">restart</button>
           <button class="mini" data-act="stop">stop</button>
           <button class="mini" data-act="start">start</button>
+          <button class="proc-log-toggle" data-act="usage" hidden>▸ usage</button>
           <button class="proc-log-toggle" data-act="log">▸ logs</button>
           <span class="proc-stats" id="proc-stats-${name}"></span>
         </div>
+        <div class="proc-usage" id="proc-usage-${name}" hidden></div>
         <div class="proc-log${_procExpanded.has(name)?' expanded':''}" id="proc-log-${name}" ${_procExpanded.has(name)?'':'hidden'}>
           <pre></pre>
         </div>`;
@@ -1683,6 +1686,7 @@ function renderProcs(data){
       card.querySelector('[data-act="restart"]').onclick=()=>procAction(name,"restart");
       card.querySelector('[data-act="stop"]').onclick=()=>procAction(name,"stop");
       card.querySelector('[data-act="start"]').onclick=()=>procAction(name,"start");
+      card.querySelector('[data-act="usage"]').onclick=()=>toggleProcUsage(name);
       card.querySelector('[data-act="log"]').onclick=()=>toggleProcLog(name);
       container.appendChild(card);
     }
@@ -1710,6 +1714,18 @@ function renderProcs(data){
       if(s.command) parts.push("cmd: "+s.command.substring(0,80)+(s.command.length>80?"…":""));
       meta.textContent = parts.join("  ·  ");
     }
+    const usageBtn=document.querySelector(`#proc-card-${name} [data-act="usage"]`);
+    const usagePanel=document.querySelector("#proc-usage-"+name);
+    const canUsage=!s.disabled&&!s.remote&&(s.alive||s.swap);
+    if(usageBtn){
+      usageBtn.hidden=!canUsage;
+      usageBtn.textContent=(_usageExpanded.has(name)?"▾":"▸")+" usage";
+    }
+    if(usagePanel){
+      usagePanel.hidden=!canUsage||!_usageExpanded.has(name);
+      if(!canUsage) delete usagePanel.dataset.loaded;
+      else if(!usagePanel.hidden&&!usagePanel.dataset.loaded) loadProcUsage(name);
+    }
     // Lifetime stats right of the logs button: MTP acceptance (log-parsed),
     // avg speeds + cumulative tokens (server /metrics since boot).
     const ps = document.querySelector("#proc-stats-"+name);
@@ -1730,9 +1746,52 @@ function renderProcs(data){
     }
   }
 }
+function _gib(value){ return value==null?"—":esc(value)+" GiB"; }
+async function loadProcUsage(name){
+  const el=document.querySelector("#proc-usage-"+name); if(!el) return;
+  el.dataset.loaded="1";
+  el.innerHTML="<p class='muted'>Reading live process and storage usage…</p>";
+  try{
+    const r=await api("/api/admin/processes/"+encodeURIComponent(name)+"/usage");
+    const d=await r.json();
+    if(!r.ok){ el.innerHTML=`<p class="note err">${esc(d.detail||"usage unavailable")}</p>`; return; }
+    const ram=d.ram||{}, disk=d.disk||{}, mounts={};
+    (disk.mounts||[]).forEach(m=>{ mounts[m.path]=m; });
+    const vramRows=(d.vram||[]).map(v=>`<tr><td>GPU ${esc(v.gpu)}</td><td>${_gib(v.process_gib)}</td><td>${_gib(v.card_used_gib)}</td><td>${_gib(v.card_total_gib)}</td></tr>`).join("");
+    const diskRows=(disk.artifacts||[]).map(a=>{
+      const m=mounts[a.mount]||{};
+      return `<tr><td>${esc(a.kind)}</td><td class="usage-path">${esc(a.path)}${a.error?`<br><span class="s-err">${esc(a.error)}</span>`:""}</td><td>${_gib(a.size_gib)}</td><td>${esc(a.mount||"—")}</td><td>${_gib(m.free_gib)}</td></tr>`;
+    }).join("");
+    el.innerHTML=`
+      <div class="row"><b>${esc(d.preset)}</b><span class="muted">slot ${esc(d.slot)} · pid ${esc(d.pid)}${d.swapped?" · strength swap":""}</span>
+        <button class="mini" data-usage-refresh>refresh</button><span class="muted">${esc(d.collected_at||"")}</span></div>
+      <div class="grid usage-grid">
+        <div class="stat"><div class="k">Host RAM · ${esc(ram.processes||0)} processes</div><div class="v">${_gib(ram.used_gib)}</div><div class="muted">${esc(ram.source||"unavailable")}</div></div>
+        <div class="stat"><div class="k">Model artifacts</div><div class="v">${_gib(disk.total_gib)}</div><div class="muted">weights, projector and draft on disk</div></div>
+        <div class="stat"><div class="k">Per-process VRAM source</div><div class="v usage-source">${esc(d.vram_source||"unavailable")}</div><div class="muted">whole-card totals include other tenants</div></div>
+      </div>
+      <h2>VRAM per GPU</h2>
+      ${vramRows?`<table><thead><tr><th>GPU</th><th>This preset</th><th>Whole card used</th><th>Card total</th></tr></thead><tbody>${vramRows}</tbody></table>`:"<p class='muted'>No GPU VRAM reported — CPU preset or unavailable telemetry.</p>"}
+      <h2>Model artifacts on disk</h2>
+      ${diskRows?`<table><thead><tr><th>Artifact</th><th>Path</th><th>Size</th><th>Filesystem</th><th>Free</th></tr></thead><tbody>${diskRows}</tbody></table>`:"<p class='muted'>No local model artifacts found.</p>"}
+      <p class="muted">Disk sizes cover preset artifacts only, not runtime/KV caches. RAM is proportional set size across the server process tree.</p>
+      ${(d.warnings||[]).length?`<p class="note err">${esc(d.warnings.join(" · "))}</p>`:""}`;
+    el.querySelector("[data-usage-refresh]").onclick=()=>loadProcUsage(name);
+  }catch(e){ el.innerHTML=`<p class="note err">usage probe failed: ${esc(e)}</p>`; }
+}
+function toggleProcUsage(name){
+  const el=document.querySelector("#proc-usage-"+name); if(!el) return;
+  if(el.hidden){
+    el.hidden=false; _usageExpanded.add(name); loadProcUsage(name);
+  }else{
+    el.hidden=true; _usageExpanded.delete(name);
+  }
+  const btn=document.querySelector(`#proc-card-${name} [data-act="usage"]`);
+  if(btn) btn.textContent=(el.hidden?"▸":"▾")+" usage";
+}
 function toggleProcLog(name){
   const el = document.querySelector("#proc-log-"+name);
-  const btn = el?.previousElementSibling?.querySelector(".proc-log-toggle");
+  const btn = document.querySelector(`#proc-card-${name} [data-act="log"]`);
   if(!el) return;
   if(el.hidden){ el.hidden=false; _procExpanded.add(name); if(btn) btn.textContent="▾ logs";
     el.scrollTop = el.scrollHeight;
