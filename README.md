@@ -16,7 +16,7 @@ on your box unless you say otherwise.
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with occamy 1.0 (27B-class with an MTP draft head) as the
+I run it with occamy 1.0 (Qwen3.6-35B-A3B with an MTP draft head) as the
 brain and a 27B dense turbo coder on the second GPU
 for coding / specialised tasks, vision included via its mmproj (the exact setup:
 [docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fifteen-odd-candidate
@@ -121,7 +121,7 @@ Things to play with when you try it:
   the delegation itself** (auto-delegate), and a finished delegation now
   gets **reviewed fresh-context by the strongest available model**, never
   by the brain that ordered it. My current driver came out of that table:
-  occamy 1.0, a 27B-class co-work SFT with an MTP draft head (exact model
+  occamy 1.0, a Qwen3.6-35B-A3B co-work SFT with an MTP draft head (exact model
   and box in [docs/my-setup.md](docs/my-setup.md)) — 20/30 on the 10-case
   flip set that actually distinguishes brains, where the reigning 35B MoE
   held ~18/30, and it solves `graph-orientation` *without* delegating, a

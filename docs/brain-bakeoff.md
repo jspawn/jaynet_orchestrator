@@ -721,7 +721,7 @@ is brain choice. The case stays as the honesty sentinel for brain swaps.
 
 ## Brain A/B/C: cyber-tiel-35b-a3b vs occamy-1.0 MiniPlus vs occamy-1.0 Q4_K_M (2026-10-11)
 
-Occamy 1.0 (Accio-Lab, 27B-class with MTP head) auditioned in two builds:
+Occamy 1.0 (Accio-Lab, Qwen3.6-35B-A3B with MTP head) auditioned in two builds:
 MiniPlus (IsValorum abliterated custom quant, separate `--model-draft` MTP
 file) and fetchingcat Q4_K_M (official weights, embedded MTP head
 `blk.40.nextn.*`, 21.7 GB). Specialist pinned to qwen3-8-27b-turbo-coder
