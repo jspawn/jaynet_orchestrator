@@ -35,7 +35,8 @@ devbox. Do not paste them into `code.check` shell commands; use an inline
 
 `doc.extract` and `read_xlsx.py` cover **values**, not formatting. For a cell's
 background/fill color, use **`code.check(language="python")`** with `openpyxl`
-(the devbox ships it), passing the spreadsheet path from `fs.list`:
+(the devbox ships it), passing the ABSOLUTE spreadsheet path from `fs.list`
+(Python starts in `ORCH_EXEC_WORK`, not the project root):
 
     from openpyxl import load_workbook
     ws = load_workbook(path).active          # or wb["SheetName"]

@@ -4,6 +4,7 @@ shape: implement-from-spec
 checkpoints:
   - Contract note.set written (deliverables, checks, unknowns)
   - Spec's own tests/examples read before implementing
+  - If TDD was requested: failing test run captured before implementation
   - Smallest end-to-end version ran at least once
   - Spec's own check command ran and passed
   - Every deliverable file from the contract exists (fs.list)
@@ -31,6 +32,13 @@ Before any implementation, `note.set` with:
   something else is the #1 way these runs fail.
 - **Unknowns**: what the spec leaves open. Pick the simplest interpretation;
   write your assumption next to it.
+
+## Test-first branch (only when the task requests TDD/tests first)
+1. Delegate or write ONLY the requested test file(s) — no implementation yet.
+2. Run the spec's exact test command with `code.check` and capture the expected
+   red failure (missing module/functions). Do not implement before this run.
+3. Continue with step 2 below for the implementation, then re-run to green.
+   Never bundle the first tests and implementation into one delegation.
 
 ## 2. Smallest end-to-end version (within the first few turns)
 Write the dumbest complete version that produces the deliverable in the right
