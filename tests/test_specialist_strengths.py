@@ -322,6 +322,7 @@ def _recording_spawn(seen):
     async def spawn(task, tools=None, model=None, name=None, budget=None,
                     verify=None, todos_sync=False, work_root_path=None):
         seen["model"] = model
+        seen["name"] = name
         return {"status": "ok", "answer": "done", "run_id": "s", "budget": {}}
     return spawn
 
@@ -341,6 +342,34 @@ def test_delegate_routes_to_coding_strong_slot(monkeypatch):
     assert r.result["model"] == "local-specialist"
     assert "routed" in r.result
     assert "not the coding model" not in (r.result.get("note") or "")
+
+
+def test_delegate_child_label_uses_active_preset_and_strength(monkeypatch):
+    _patch_slots(monkeypatch, {
+        "specialist": {"preset": "agents1", "serving": "agents-a1-35b",
+                       "strengths": ["research"], "alias": "local-specialist"}})
+    cfg = dict(CFG)
+    cfg["models"] = {**CFG["models"], "slots": {"specialist": "agents1"}}
+    seen = {}
+    ctx = ToolContext(request_id="t", config=cfg, budget=None,
+                      spawn=_recording_spawn(seen))
+    r = run(SpecialistDelegate().execute(
+        {"task": "research this", "strength": "research"}, ctx))
+    assert seen["name"] == "agents1 [research]"
+    assert r.result["agent"] == "agents1 [research]"
+
+
+def test_delegate_child_label_marks_harness_auto_trigger(monkeypatch):
+    _patch_slots(monkeypatch, {
+        "specialist": {"preset": "agents1", "serving": "agents-a1-35b",
+                       "strengths": ["coding"], "alias": "local-specialist"}})
+    cfg = dict(CFG)
+    cfg["models"] = {**CFG["models"], "slots": {"specialist": "agents1"}}
+    seen = {}
+    ctx = ToolContext(request_id="t", config=cfg, budget=None,
+                      spawn=_recording_spawn(seen))
+    run(SpecialistDelegate().execute({"task": "fix it", "_trigger": "auto"}, ctx))
+    assert seen["name"] == "agents1 [auto]"
 
 
 def test_delegate_exact_strength_beats_allround(monkeypatch):
@@ -389,6 +418,7 @@ def test_delegate_explicit_model_skips_routing(monkeypatch):
     run(SpecialistDelegate().execute({"task": "fix it", "model": "glm-5.2"},
                                _delegate_ctx(_recording_spawn(seen))))
     assert seen["model"] == "glm-5.2"
+    assert seen["name"] == "glm-5.2 [manual]"
 
 
 def test_delegate_coding_child_has_vision_lane(monkeypatch):

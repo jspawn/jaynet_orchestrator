@@ -330,6 +330,23 @@ SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("vision", "local-vision"))
 
 
+def preset_name_for_alias(config: dict, alias: str | None) -> str:
+    """Display identity of the preset serving `alias` ("" when unknown).
+
+    Slot aliases resolve through the active slot, never an older preset that
+    happens to share the alias. Custom aliases resolve only when unambiguous.
+    """
+    if not alias:
+        return ""
+    slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
+    if slot:
+        return slot_preset_name(config, slot)
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    matches = [name for name, preset in presets.items()
+               if isinstance(preset, dict) and preset.get("alias") == alias]
+    return matches[0] if len(matches) == 1 else ""
+
+
 def brain_overlay_for(config: dict, alias: str | None) -> dict:
     """Active overlay metadata for the preset serving `alias`.
 

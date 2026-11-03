@@ -4296,6 +4296,7 @@ def test_auto_delegate_fires_on_refusal_streak(monkeypatch):
     assert "AUTO-DELEGATED BY THE LOOP GUARD" in brief
     assert "ORIGINAL REQUEST" in brief and "spin without progress" in brief
     assert delegate.last_args.get("strength"), "a harness-picked strength routes it"
+    assert delegate.last_args.get("_trigger") == "auto"
     assert check.exec_count == 1, "gates disarm after a successful hand-over"
     fired = [e for e in events if e["type"] == "auto_delegate"]
     assert len(fired) == 1 and fired[0]["data"]["status"] == "ok"

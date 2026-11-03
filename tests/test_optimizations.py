@@ -97,7 +97,8 @@ def test_delegate_uses_configured_coder_and_tools(project):
     ctx = ToolContext(request_id="t", config=cfg, budget=None, spawn=fake_spawn)
     r = run(SpecialistDelegate().execute({"task": "fix the parser in app.py; tests must pass"}, ctx))
     assert r.status == "ok"
-    assert captured["model"] == "qwen_coder" and captured["name"] == "coder"
+    assert captured["model"] == "qwen_coder"
+    assert captured["name"] == "qwen_coder [manual]"
     assert "code.run" in captured["tools"] and "git.commit" in captured["tools"]
 
 

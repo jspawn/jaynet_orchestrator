@@ -393,6 +393,23 @@ async def _worktree_report(wt: dict) -> dict:
     }
 
 
+def _child_label(run: _DelegateRun) -> str:
+    """Human-facing child identity: active preset plus the selection reason."""
+    from runtime.preset_store import preset_name_for_alias
+    orch = (run.ctx.config.get("orchestrator") or {})
+    alias = run.model or orch.get("model")
+    model = preset_name_for_alias(run.ctx.config, alias) or alias or "(default brain)"
+    if run.args.get("_trigger") == "auto":
+        reason = "auto"
+    elif run.args.get("model"):
+        reason = "manual"
+    elif run.routed or run.args.get("strength") or run.cfg.get("strength"):
+        reason = run.wanted
+    else:
+        reason = "manual"
+    return f"{model} [{reason}]"
+
+
 @dataclass
 class _DelegateRun:
     """Per-call state threaded through the execute() phases.
@@ -818,7 +835,7 @@ class SpecialistDelegate(Tool):
             _rs = role_sampling(run.ctx.config, run.wanted, model=run.model)
             run.child = await run.ctx.spawn(
                 run.task, tools=run.tools, model=run.model,
-                name="coder", budget=run.budget, verify=run.verify,
+                name=_child_label(run), budget=run.budget, verify=run.verify,
                 **({"sampling": _rs} if _rs else {}),
                 **({"base_system": run.worker_base}
                    if run.worker_base else {}),
@@ -906,7 +923,7 @@ class SpecialistDelegate(Tool):
         brain-landing warnings, tamper remedy) and the final ToolResult."""
         child = run.child
         result = {
-            "agent": "coder",
+            "agent": _child_label(run),
             "model": run.model or "(default brain)",
             "status": child.get("status"),
             "verified": (run.authored_check["verified"] if run.authored_check

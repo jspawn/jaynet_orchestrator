@@ -247,7 +247,9 @@ class DispatchGateContext:
                       "This is evidence, not an intermediate solution; use "
                       "it and re-check the source image if needed:\n"
                       + rs.vision_handoff[:6000])
-        args = {"task": brief, "strength": tag}
+        # Internal display metadata only: the child row can distinguish a
+        # harness-side hand-over from a model-issued specialist.delegate call.
+        args = {"task": brief, "strength": tag, "_trigger": "auto"}
         result = await self.runtime._execute_tool(tool_name, args, self.ctx)
         ok = result.status == "ok"
         _pcap = int((self.runtime.config.get("web", {}) or {})
