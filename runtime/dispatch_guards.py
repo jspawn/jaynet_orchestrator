@@ -370,7 +370,7 @@ class DispatchGateContext:
             rs._last_reqs_emit[0] = reqs
             await self.emit("todos", rs.budget.iterations,
                             {"items": snap, "requirements": reqs,
-                             "req_checks": {t: c.get("verified") for t, c in
+                             "req_checks": {t: dict(c) for t, c in
                                             rs.todo_list.req_checks.items()}})
         # Write-through to <work_root>/ledger.json — the plan survives a
         # fresh run in the same workspace (notes.md pattern; best-effort).

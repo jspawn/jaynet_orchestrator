@@ -192,6 +192,34 @@ def test_record_check_marks_items_and_requirements():
     assert tl.req_checks["[must] r"]["verified"] is True
 
 
+def test_workspace_mutation_marks_proofs_stale_until_rerun():
+    tl = TodoList()
+    tl.apply({"action": "set", "items": [
+        {"title": "[must] proven", "check": "exit 0"}]})
+    tl.apply({"requirements": ["[must] answer | check: exit 0"]})
+    tl.apply({"action": "update", "id": 1, "status": "done"})
+    tl.record_check("item", 1, verified=True)
+    tl.record_check("requirement", "[must] answer", verified=True)
+
+    assert tl.invalidate_verified() == 2
+    assert tl.invalidate_verified() == 0       # already stale: no duplicate notes
+    assert "verified" not in tl.items[0]
+    assert tl.items[0]["proof_stale"] is True
+    assert tl.req_checks["[must] answer"]["proof_stale"] is True
+    assert "[must] proven (proof stale — rerun check)" in tl.open_must()
+    assert "↻ STALE" in tl.render()
+
+    # Routine whole-list requirement updates must not launder stale proof.
+    tl.apply({"requirements": ["[must] answer | check: exit 0"]})
+    assert tl.req_checks["[must] answer"]["proof_stale"] is True
+
+    tl.record_check("item", 1, verified=True)
+    tl.record_check("requirement", "[must] answer", verified=True)
+    assert tl.items[0]["verified"] is True
+    assert "proof_stale" not in tl.items[0]
+    assert "proof_stale" not in tl.req_checks["[must] answer"]
+
+
 # ---- open_must semantics ----
 
 def test_open_must_requires_verified_for_checked_must_items():
@@ -389,6 +417,64 @@ class _WriteTool:
         p.write_text(args["content"], encoding="utf-8")
         return ToolResult(status="ok", tool_name="fs.write",
                           result={"path": args["path"]})
+
+
+def test_edit_after_green_requires_a_fresh_check(tmp_path):
+    rt, _ = _runtime(_Registry(["todos", "fs.write"],
+                               real={"todos": TodosTool(),
+                                     "fs.write": _WriteTool()}), [
+        _tc("todos", '{"action":"set","items":[{"title":"[must] flag exists",'
+                     '"check":"test -f flag"}]}'),
+        _tc("fs.write", '{"path":"flag","content":"first"}'),
+        _tc("todos", '{"action":"update","id":1,"status":"done"}'),
+        _tc("fs.write", '{"path":"flag","content":"changed after proof"}'),
+        _final("stale but claimed done"),            # must bounce
+        _tc("todos", '{"action":"verify","id":1}'),
+        _final("freshly verified")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("prove it", tools=["todos", "fs.write"],
+                             on_event=on_event, work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["open_must"] == []
+    assert [e["type"] for e in events].count("requirements_gate") == 1
+    snaps = [e["data"]["items"] for e in events if e["type"] == "todos"]
+    assert any(s[0].get("proof_stale") is True for s in snaps)
+    assert snaps[-1][0]["verified"] is True
+    assert "proof_stale" not in snaps[-1][0]
+    ledger = json.loads((tmp_path / "ledger.json").read_text())
+    assert ledger["items"][0]["verified"] is True
+    assert "proof_stale" not in ledger["items"][0]
+
+
+class _FailWriteTool(_WriteTool):
+    async def execute(self, args, ctx):
+        return ToolResult(status="error", tool_name="fs.write",
+                          result={}, error="disk full")
+
+
+def test_failed_write_does_not_invalidate_fresh_proof(tmp_path):
+    rt, _ = _runtime(_Registry(["todos", "fs.write"],
+                               real={"todos": TodosTool(),
+                                     "fs.write": _FailWriteTool()}), [
+        _tc("todos", '{"action":"set","items":[{"title":"[must] checked",'
+                     '"check":"exit 0"}]}'),
+        _tc("todos", '{"action":"update","id":1,"status":"done"}'),
+        _tc("fs.write", '{"path":"flag","content":"not written"}'),
+        _final("still verified")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("prove it", tools=["todos", "fs.write"],
+                             on_event=on_event, work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["open_must"] == []
+    assert not [e for e in events if e["type"] == "requirements_gate"]
+    snaps = [e["data"]["items"] for e in events if e["type"] == "todos"]
+    assert snaps[-1][0]["verified"] is True
 
 
 class _Confirm:

@@ -80,8 +80,11 @@ promised and what was verified — replacing "the model says it's done".
 The harness runs it through the verify sandbox (vacuity guard included) when
 the item is marked done, or on demand via `todos action=verify`, and records
 a harness-set `verified` flag; the requirements gate then demands a checked
-`[must]` be **verified, not just done**, before the finish is accepted. The
-plan writes through to `<workspace>/ledger.json` on every change (the
+`[must]` be **verified, not just done**, before the finish is accepted. A
+later acknowledged file write marks earlier proofs `proof_stale` (↻), so the
+old green cannot certify a newer tree; `todos action=verify` re-proves it.
+Failed or refused writes do not invalidate proof (Soei, arXiv 2610.39468).
+The plan writes through to `<workspace>/ledger.json` on every change (the
 notes.md pattern); `/goal` iterations rehydrate it — only into an empty list
 and only when the ledger's goal criterion matches, so unrelated runs never
 inherit a stale plan. The ToDos panel and chat feed show check state

@@ -758,7 +758,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         self.skill_catalog = render_catalog(self.skills)
 
     async def _record_tool_results(self, plans: list[dict], rs: RunState,
-                                   emit, emit_cost, post_tool_guards) -> int:
+                                   emit, emit_cost, post_tool_guards,
+                                   work_root=None) -> int:
         """Emit + record + append for one batch of executed tool calls —
         original tool-call order preserved (extracted from run(), audit #1
         phase 2). Per call: tool_result event, trajectory/usage accounting,
@@ -807,6 +808,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                       or args.get("dst") or args.get("file"))
                 if _p:
                     rs.files_touched.add(str(_p))
+
+            # Proof freshness (Soei / arXiv 2610.39468): a successful check
+            # verifies the tree as it was THEN. A later acknowledged write
+            # makes checked todos/requirements stale, so the final gate must
+            # not accept the old green as proof of the new tree. Failed or
+            # refused writes change nothing and keep the existing proof.
+            if (result.status == "ok" and not plan.get("blocked")
+                    and _gate_write_like(name, args)
+                    and not _exec_failure(name, result)[0]
+                    and rs.todo_list.invalidate_verified()):
+                snap = rs.todo_list.snapshot()
+                reqs = list(rs.todo_list.requirements)
+                rs._last_todos_emit[0] = snap
+                rs._last_reqs_emit[0] = reqs
+                await emit("todos", rs.budget.iterations, {
+                    "items": snap, "requirements": reqs,
+                    "req_checks": {t: dict(c) for t, c in
+                                   rs.todo_list.req_checks.items()}})
+                rs.todo_list.save_ledger(work_root, rs.ledger_goal)
 
             # Repeat-error hard block bookkeeping: count identical
             # (tool, args, error) failures so the dispatch gate can
@@ -1586,7 +1606,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # phase 2). Returns the mutation generation from before this
                 # batch for the stall bookkeeping below.
                 _mg_before = await self._record_tool_results(
-                    plans, rs, emit, emit_cost, post_tool_guards)
+                    plans, rs, emit, emit_cost, post_tool_guards,
+                    work_root=work_root)
                 # Stall ladder bookkeeping: a turn that bumped the mutation
                 # generation made progress (reset); a turn of ONLY ACTIVE
                 # job polls is waiting on work (neutral); anything else —

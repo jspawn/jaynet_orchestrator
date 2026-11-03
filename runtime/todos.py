@@ -18,7 +18,9 @@ synchronous: apply() only REPORTS due checks (`checks_due` — a done-transition
 on a checked item, or an explicit `verify` action); the async caller
 (dispatch_guards.todos_update) runs them through the verify sandbox and calls
 record_check() with the outcome. `verified` is harness-set, never model-set.
-The final-answer requirements gate reads open_must(): a [must] entry with a
+A later acknowledged write marks that proof `proof_stale`: verification is
+about the tree that was checked, not whatever changed afterwards. The
+final-answer requirements gate reads open_must(): a [must] entry with a
 declared check must be VERIFIED, not just done/dropped.
 
 The list writes through to <work_root>/ledger.json on every change (the
@@ -26,8 +28,8 @@ notes.md pattern) so /goal iterations — fresh run, same workspace — can
 rehydrate the plan; load_ledger only accepts a ledger whose goal criterion
 matches the current run's, so an unrelated run never inherits a stale plan.
 The file is agent-writable, so hydration restores the PLAN only — proof
-flags (`verified`, `baseline_ref`) are dropped at the boundary and re-prove
-at the next done/verify transition (audit #30 C1).
+flags (`verified`, `proof_stale`, `baseline_ref`) are dropped at the boundary
+and re-prove at the next done/verify transition (audit #30 C1).
 """
 
 from __future__ import annotations
@@ -155,14 +157,15 @@ class TodoList:
             if s:
                 reqs.append(s)
                 if check:
-                    # Re-declaring a check keeps any previous verified flag
-                    # for the SAME command; a changed command re-verifies.
+                    # Re-declaring the SAME command preserves its proof state;
+                    # a changed command must prove itself again. In particular,
+                    # routine whole-list updates must not clear a stale mark.
                     old = self.req_checks.get(s)
-                    self.req_checks[s] = {
-                        "check": check,
-                        **({"verified": old["verified"]}
-                           if old and old.get("check") == check
-                           and "verified" in old else {})}
+                    self.req_checks[s] = {"check": check}
+                    if old is not None and old.get("check") == check:
+                        for key in ("verified", "proof_stale"):
+                            if key in old:
+                                self.req_checks[s][key] = old[key]
         self.requirements = reqs
         live = set(reqs)
         self.req_checks = {t: c for t, c in self.req_checks.items()
@@ -283,6 +286,7 @@ class TodoList:
             else:                        # a new command must prove itself
                 it.pop("check", None)    # explicit "" clears the declaration
             it.pop("verified", None)
+            it.pop("proof_stale", None)
         if status is None and not note and desc is None and check is None:
             return "update changes nothing — pass status, note, desc and/or check"
         return None
@@ -368,6 +372,29 @@ class TodoList:
         return [{"kind": "item", "id": it["id"], "title": it["title"],
                  "check": it["check"]}], None
 
+    def invalidate_verified(self) -> int:
+        """Mark successful proofs stale after a later workspace mutation.
+
+        Verification describes the tree that was checked, not whatever the
+        agent writes afterwards. Keep the declaration and history, but make
+        the final gate require a fresh check. Returns the number of entries
+        invalidated so the loop can emit/persist only when something changed.
+        """
+        count = 0
+        for it in self.items:
+            if it.get("verified") is True:
+                it.pop("verified", None)
+                it["proof_stale"] = True
+                it["info"].append("proof stale — workspace changed; rerun check")
+                del it["info"][:-MAX_NOTES]
+                count += 1
+        for rc in self.req_checks.values():
+            if rc.get("verified") is True:
+                rc.pop("verified", None)
+                rc["proof_stale"] = True
+                count += 1
+        return count
+
     def record_check(self, kind: str, key, *, verified: bool,
                      note: str = "") -> None:
         """Write a check OUTCOME back onto its entry (async caller's report —
@@ -377,6 +404,7 @@ class TodoList:
             it = next((x for x in self.items if x["id"] == key), None)
             if it is None:
                 return
+            it.pop("proof_stale", None)
             it["verified"] = bool(verified)
             if note:
                 it["info"].append(note[:MAX_DESC])
@@ -384,6 +412,7 @@ class TodoList:
         else:
             rc = self.req_checks.get(str(key))
             if rc is not None:
+                rc.pop("proof_stale", None)
                 rc["verified"] = bool(verified)
 
     def open_must(self, checks_enabled: bool = True) -> list[str]:
@@ -399,7 +428,9 @@ class TodoList:
         open_ += [r for r in self.requirements
                   if r.lower().startswith("[must]")]
         if checks_enabled:
-            open_ += [t["title"] + " (check not verified)"
+            open_ += [t["title"] + (" (proof stale — rerun check)"
+                                    if t.get("proof_stale")
+                                    else " (check not verified)")
                       for t in self.items
                       if t.get("status") == "done" and t.get("check")
                       and t.get("verified") is not True
@@ -466,6 +497,7 @@ class TodoList:
             for raw in raws:
                 if isinstance(raw, dict):
                     raw.pop("verified", None)
+                    raw.pop("proof_stale", None)
                     raw.pop("baseline_ref", None)
         self.replace(raws)
         self.requirements = [str(r).strip()[:MAX_REQ]
@@ -497,6 +529,8 @@ class TodoList:
                           for x in (raw.get("info") or [])][:MAX_NOTES]
             if "verified" in raw:        # ledger state survives the sync
                 it["verified"] = bool(raw["verified"])
+            if raw.get("proof_stale"):
+                it["proof_stale"] = True
             if raw.get("baseline_ref"):
                 it["baseline_ref"] = str(raw["baseline_ref"])
             items.append(it)
@@ -527,6 +561,8 @@ class TodoList:
                 if it.get("check"):
                     line += " [check " + ("✓" if it.get("verified") is True
                             else "✗ FAILED" if it.get("verified") is False
+                            else "↻ STALE — rerun with todos verify"
+                            if it.get("proof_stale")
                             else "— runs when marked done") + "]"
                 if it["status"] == "working" and it["desc"]:
                     line += f" — {it['desc'][:200]}"
@@ -543,6 +579,8 @@ class TodoList:
                     r += " [check " + ("✓ verified" if rc.get("verified") is True
                          else "✗ FAILED — fix, then todos verify"
                          if rc.get("verified") is False
+                         else "↻ STALE — rerun with todos verify"
+                         if rc.get("proof_stale")
                          else "— verify with todos action=verify before dropping") + "]"
                 reqs.append(r)
             parts.append(

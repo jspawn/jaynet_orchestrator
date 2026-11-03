@@ -84,11 +84,14 @@ function renderTodos(items, reqs, reqChecks){
   syncTodoToggle();
   const list=$("#todoList"); list.innerHTML="";
   let done=0;
-  const chkMark=(verified)=>{               // ledger: machine-check state
+  const chkMark=(state)=>{                  // ledger: machine-check state
+    const obj=state&&typeof state==="object";
+    const verified=obj?state.verified:state;
+    const stale=obj&&state.proof_stale===true;
     const s=document.createElement("span");
     s.className="tchk "+(verified===true?"ok":verified===false?"bad":"wait");
-    s.textContent=verified===true?"✓":verified===false?"✗":"…";
-    s.title=verified===true?"check verified":verified===false?"check FAILED":"check declared — runs when marked done";
+    s.textContent=verified===true?"✓":verified===false?"✗":stale?"↻":"…";
+    s.title=verified===true?"check verified":verified===false?"check FAILED":stale?"proof stale — workspace changed; rerun check":"check declared — runs when marked done";
     return s;
   };
   for(const it of items){
@@ -102,7 +105,7 @@ function renderTodos(items, reqs, reqChecks){
     const ttl=document.createElement("span"); ttl.className="ttitle";
     ttl.textContent=it.title||"?";
     main.appendChild(ico); main.appendChild(ttl);
-    if(it.check) main.appendChild(chkMark(it.verified));
+    if(it.check) main.appendChild(chkMark(it));
     const notes=(it.info||[]).filter(Boolean);
     if(it.desc || notes.length){
       const chev=document.createElement("span"); chev.className="tchev"; chev.textContent="▸";
