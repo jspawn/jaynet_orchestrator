@@ -11,53 +11,6 @@ loop guard, …).
 
 ## Open
 
-### Brain watch: RecursiveSI/flint (evaluated on paper 2026-10-22, parked)
-
-[Flint](https://huggingface.co/RecursiveSI/flint) — 39.8B-total/~2.5B-active
-MoE trained from scratch, Apache-2.0, 262k context (35 of 49 layers are
-512-token sliding window), aimed at **coding agents** (TB 2.1 54.9,
-SWE-bench Verified 74.2, SWE-Pro 89.7). Compared against occamy-1.0 as a
-next brain and parked:
-
-- **Wrong role on paper.** Flint is specialist-shaped (repo digging, bug
-  fixes, tests); the brain slot wants occamy's co-work/long-horizon
-  training (state tracking across delegation + compaction). Occamy's card
-  even posts the higher TB 2.1 (59.0 vs 54.9); only occamy publishes
-  tool-calling/co-work benches.
-- **Nothing to serve it with.** Custom arch (NoPE full-attention layers,
-  attention sinks, per-head QK RMSNorm): no GGUF, no llama.cpp support,
-  official path is SGLang on B300/H200; quants announced for NVIDIA +
-  Apple Silicon only. Can't load it on the R9700 stack today.
-- **Revisit when** llama.cpp/GGUF support lands AND someone has it running
-  on ROCm — then evaluate it as a *specialist* candidate (radiance slot
-  class), not as brain. Check the HF repo + llama.cpp issues for "flint"
-  in a few weeks.
-
-### Research watch: latent/parallel generation (evaluated 2026-10-21, skip for now)
-
-Two Together/Stanford papers, both reviewed and parked — elegant, but
-nothing servable today:
-
-- **HybridAgent** ([paper](https://arxiv.org/pdf/2610.18861),
-  [model](https://huggingface.co/togethercomputer/HybridAgent-14B-Agentic),
-  [code](https://github.com/togethercomputer/HybridAgent)) — Qwen3-Base +
-  HybridLink adapter; thinks in latent space (hidden states fed back as
-  inputs), acts in text. +17.4% over agentic baselines, ~2× faster, ~50%
-  fewer tokens. **Blocker:** no serving engine supports hidden-state
-  feedback; backbone-only serving loses the entire point. Revisit if
-  latent/hybrid generation lands in vllm or llama.cpp upstream.
-- **NCM — Next-Concept Modeling**
-  ([paper](https://arxiv.org/pdf/2610.14162)) — multiscale VQ-VAE codes,
-  generates coarse-to-fine with all codes of a level in parallel ("whole
-  sentences at once", 10–31× faster than diffusion LMs). **Blocker:** a
-  training recipe, not a checkpoint — experiments at ~100M params, nothing
-  to download or serve.
-
-Watch instead (could arrive as a serving feature we'd get for a preset
-flag): **DFlash**-style diffusion drafters for speculative decoding, and
-production diffusion LMs (**Mercury**, **DiffusionGemma**) reaching
-llama.cpp/vllm support.
-
 ### Memory-ablation eval cases with cross-run state (arxiv 2610.07782)
 
 The paper measured a persistent memory tier on single-question benchmarks
@@ -282,9 +235,7 @@ coding/research 0.92–1.00, vision 0.99, chat → general 0.96, ~0.4s,
 ~$0.0003 total — including research/vision/multi-step routes the keyword
 router never fires. Decision (user, 2026-09-22): STAY KEYWORD —
 cloud-routing every request's text is the wrong default for a local-first
-box. Plugin ships disabled with `route: false`. Revisit when an open
-checkpoint trained on intent routing lands (Open-Jev 27B run / V3 stage),
-or test the 9B (~18 GB VRAM — doesn't fit the current layout).
+box. Plugin ships disabled with `route: false`.
 
 **jevify option LIVE (2026-09-22):** [jevify](https://github.com/fidecastro/jevify)
 sidecar serves the Jev API from the running Qwen3.8-27B specialist
