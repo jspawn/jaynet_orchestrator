@@ -74,6 +74,8 @@ class RunState:
     # ladder and the final-answer procedure check.
     proc_name: str | None = None
     proc_checkpoints: list[str] = field(default_factory=list)
+    # Manual and deterministic skill loads, used to prevent duplicate injection.
+    loaded_skills: set[str] = field(default_factory=set)
     # Run outcome.
     final_answer: str = ""
     status: str = "ok"

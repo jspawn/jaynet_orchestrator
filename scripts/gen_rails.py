@@ -41,6 +41,8 @@ META: dict[str, tuple[str, str]] = {
     "deliverable_warn": ("agent.deliverable_check.enabled / .warn_at",
                          "true / 0.75"),
     "wrap_up": ("loop_guard.max_rejections", "6"),
+    "diagnosing_skill": ("agent.skill_autoload.enabled (+ loop_guard.failure_nudge_after)",
+                         "true (+ 3)"),
     # post-tool (POST_TOOL_GUARDS)
     "failure_streak": ("loop_guard.failure_nudge_after", "3"),
     "host_give_up": ("loop_guard.host_give_up_after", "4"),

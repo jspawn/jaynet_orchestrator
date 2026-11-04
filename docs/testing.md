@@ -55,7 +55,9 @@ Fixtures (`tests/conftest.py`):
 | `test_brain_overlays.py` | versioned per-brain overlays (§4c): append-only snapshots, idempotent accept, stale-base refusal, rollback, active-slot isolation, config precedence, brain-scoped dedup and eval provenance |
 | `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, specialist.delegate; per-run sampler merge |
-| `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |
+| `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff); EGM independent reviews and readiness fail-closed |
+| `test_plan_gate.py` | deterministic auto/plan/direct routing, risky-work override, harness-side architect completion/failure, no parent-model fallback |
+| `test_procedure_selector.py` | shape-procedure checkpoints plus attachment, document-size and repeated-failure skill gates, policy exclusions and resource paths |
 | `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `specialist.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
 
 ### Web, API & chats

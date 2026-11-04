@@ -40,6 +40,9 @@ Notes that don't fit the diagram:
   the historical order of the inline blocks, kept so traces, hint
   concatenation and the UI are unchanged. Append new guards; never reorder
   silently (the module docstrings say the same).
+- The pre-turn `diagnosing_skill` guard loads `diagnosing-bugs` once after the
+  configured same-failure streak. It adds instructions and `skill_autoload`
+  telemetry only; it never runs a diagnostic tool itself.
 - Every guard application also emits one uniform `guard_fired` event
   (`{"name", "phase", "turn"}`) in addition to its legacy events — the
   rails' fire-rate telemetry. Dispatch-gate rejections emit it too

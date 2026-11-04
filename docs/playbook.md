@@ -152,7 +152,11 @@ Skills come in four flavours:
   *nudges* toward it at rating 3+, never auto-loads.
 - **Format drivers** — `pdf`, `docx`, `pptx`, `xlsx`, `archives`, `image`:
   each bundles real helper scripts next to the SKILL.md; the skill tells the
-  agent how to drive them.
+  agent how to drive them. Server-resolved attachment extensions auto-load the
+  matching driver with absolute helper paths. Oversized text auto-loads
+  `long-document`; explicit diagnosis or a repeated failure streak loads
+  `diagnosing-bugs`. These deterministic gates emit `skill_autoload` and load
+  instructions only — they never execute tools (`agent.skill_autoload`).
 
 ### 2.3 Chains — fixed pipelines
 
@@ -268,10 +272,15 @@ CLI-native tasks; that mode is only reachable through the eval runner,
 never from chats.
 
 **Strength:** the `architect` + `specialist.delegate` pair. `architect` is a
-plan-first handler that has the specialist poke holes in the plan, then
-executes unit-by-unit, each unit gated on its own `| check:` command —
-though the telemetry notes dispatch mode and strong specialists have
-largely absorbed its lane (§6). `specialist.delegate` ships the task to the
+plan-first handler with two review lanes: a single specialist review, or EGM
+mode (fresh Goldfish comprehension → two independent adversarial reviews →
+strict implementation-readiness). It then executes unit-by-unit, each unit
+gated on its own `| check:` command. `architect.mode` selects `auto` (the
+harness starts EGM architect on complex/risky requests and never falls through
+to inline implementation after a triggered failure), `plan` (handoff only), or
+`direct` (discretionary planning off; risky work still plans). The older
+`architect.threshold` remains a model-rated prompt nudge. `specialist.delegate`
+ships the task to the
 dense coder model on GPU 1, keeping
 the whole file/diff/test transcript out of the brain's context — and
 `isolated: true` runs it in a throwaway git worktree so the live tree is
@@ -682,9 +691,10 @@ with every brain swap.
   front doors absorb nearly everything: `specialist.delegate` 1,140 calls,
   `agent.spawn` 45 — and then the cliff: `architect` **1**,
   `council.debate` 1 (while `council.vote` rides along 62 times inside
-  delegations). `architect`'s plan-first lane is the open develop-or-demote
-  question: it was designed brain-first, and dispatch mode + strong
-  specialists ate its job. Chains remain thin by habit (three shipped), but
+  delegations). `architect` was initially underused because its model-rated
+  threshold only nudged; the new mechanical auto gate starts it on explicit
+  complex/risky signals, with EGM review on those automatic runs. Chains
+  remain thin by habit (three shipped), but
   `read-aloud` found the second gear — a chain that swaps models
   (writing specialist → emotion tags → TTS), not just tools.
 

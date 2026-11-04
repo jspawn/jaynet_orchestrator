@@ -516,6 +516,13 @@ agent:
       research-and-verify: ["find the official", "official codebase",
                             "official repo", "official implementation",
                             "look up the", "find the source"]
+  # Deterministic skill gates: attachment extensions/MIME metadata load their
+  # format skill; oversized text loads long-document; an explicit diagnosis
+  # request or a repeated failure streak loads diagnosing-bugs. Instructions
+  # only — no tool is auto-executed. Each skill loads at most once per run.
+  skill_autoload:
+    enabled: true
+    document_chars: 12000         # raw prompt chars or original attached-text bytes
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # specialist pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
@@ -758,9 +765,12 @@ models:
   boot: null
 
 architect:
-  threshold: 4              # complexity bar on a 1-4 scale (4=complex); per-run override in Account → Settings; 0=off
+  mode: auto                # auto = mechanical complex/risky routing; plan = plan only; direct = skip discretionary planning
+  threshold: 4              # legacy model-rated bar on a 1-4 scale (4=complex); per-run override in Account → Settings; 0=off
   reviewer_model: local-specialist  # pokes holes in the plan
   arbiter_model: kimi         # decides only when the reviewer fundamentally disagrees
+  review: standard          # manual default; auto plan-gate runs use egm (comprehension + 2 reviewers + readiness)
+  egm_reviewers: 2          # independent fresh Goldfish reviews in egm mode
   per_unit_verify: true       # execute UNITS one spawn each, harness-gated on the
                             # unit's `| check:` command (stops at the first failed
                             # unit). Only applies when EVERY unit has a check;

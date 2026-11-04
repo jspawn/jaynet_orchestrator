@@ -243,7 +243,8 @@
       <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="default"><span class="hint">results longer than this get compacted</span></label>
       <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="default"><span class="hint">newest N stay untouched</span></label>
       <label class="crow"><input type="checkbox" id="rParallel"> parallel tool execution <span class="hint">— independent tools run at once</span></label>
-      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="default"><span class="hint">complexity that triggers plan-first; 0 = off</span></label>
+      <label class="field">planning<select id="rPlanMode"><option value="">default</option><option value="auto">auto — plan complex/risky work</option><option value="plan">plan only</option><option value="direct">direct — skip discretionary planning</option></select><span class="hint">risky/outward-facing work still plans in direct mode</span></label>
+      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="default"><span class="hint">legacy model-rated plan-first nudge; 0 = off</span></label>
       <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="default"><span class="hint">rounds each spawned sub-agent gets</span></label>
     </div>
 
@@ -556,7 +557,7 @@ const RUN_MAP={ rShare:"share", rAuto:"auto", rThink:"think",
   rTemp:"sTemp", rTopP:"sTopP", rTopK:"sTopK", rRepeat:"sRepeat", rSeed:"sSeed",
   rSubIter:"bSubIter",
   rCompact:"cCompact", rMaxChars:"cMaxChars", rKeepLast:"cKeepLast", rParallel:"cParallel",
-  rThresh:"aThresh" };
+  rPlanMode:"aPlanMode", rThresh:"aThresh" };
 const RUN_BOOL=new Set(["rShare","rAuto","rThink","rCompact","rParallel"]);
 // Fallbacks until /api/me delivers the real house defaults (loadDefaults).
 let _runSrv={ rShare:false, rAuto:false, rThink:true, rCompact:true, rParallel:true };

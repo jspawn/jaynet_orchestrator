@@ -47,6 +47,12 @@ stall-ladder rungs and checked once (`procedure_check` event) before a final
 answer is accepted. See `skills/implement-from-spec/SKILL.md` for the pattern.
 Keep keywords narrow — a false positive injects the whole body for the run.
 
+Separate deterministic gates (`agent.skill_autoload`) load format skills from
+server-resolved attachment metadata, `long-document` above the configured text
+size, and `diagnosing-bugs` for explicit diagnosis or a repeated failure streak.
+These emit `skill_autoload`, include absolute bundled-resource paths, respect
+`disabled_skills`, and never execute a tool automatically.
+
 ## Two ways to create one — pick deliberately
 
 1. **Studio (no repo, no restart):** Admin → Studio → Build → Skills → *+ new skill*.

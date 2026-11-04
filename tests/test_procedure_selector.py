@@ -197,3 +197,123 @@ def test_checkpoints_ride_the_stall_ladder(tmp_path):
     rung = rungs.pop()
     assert "Active procedure 'spec-proc'" in rung
     assert "CHECKPOINT ALPHA" in rung
+
+
+# ---- deterministic format, long-document and diagnosis skill gates ----
+
+def _write_gate_skill(tmp_path, name, body, resource=False):
+    d = tmp_path / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: test skill\n---\n{body}\n")
+    if resource:
+        (d / "helper.py").write_text("print('ok')\n")
+
+
+def _gate_rt(tmp_path, script):
+    skills_cache_clear()
+    rt, seen = _runtime(_Registry(["skill.load"]), script)
+    rt.config["skills"] = {"dir": str(tmp_path / "skills")}
+    return rt, seen
+
+
+def _skill_injected(seen):
+    return list({m["content"] for msgs in seen for m in msgs
+                 if m.get("role") == "system"
+                 and isinstance(m.get("content"), str)
+                 and "Skill auto-loaded" in m["content"]})
+
+
+def test_pdf_attachment_loads_skill_and_absolute_resources(tmp_path):
+    _write_gate_skill(tmp_path, "pdf", "PDF BODY\npython <files['helper.py']>",
+                      resource=True)
+    rt, seen = _gate_rt(tmp_path, [_final("done")])
+    out = asyncio.run(rt.run(
+        "Read this\n\n[Attached files]\n"
+        "- report.PDF (binary, 500 B) saved at /tmp/report.PDF\n"
+        "  If a skill applies, load it."))
+    assert out["status"] == "ok"
+    injected = _skill_injected(seen)
+    assert len(injected) == 1
+    assert "pdf; trigger: attachment" in injected[0]
+    assert "PDF BODY" in injected[0]
+    assert str(tmp_path / "skills" / "pdf" / "helper.py") in injected[0]
+    assert "<files[" not in injected[0]
+
+
+def test_large_attached_text_uses_original_size(tmp_path):
+    _write_gate_skill(tmp_path, "long-document", "LONG BODY")
+    rt, seen = _gate_rt(tmp_path, [_final("done")])
+    out = asyncio.run(rt.run(
+        "Summarize\n\n[Attached files]\n"
+        "- notes.txt (text, 50000 B) saved at /tmp/notes.txt\n"
+        "  --- begin notes.txt ---\nshort preview\n  --- end notes.txt ---"))
+    assert out["status"] == "ok"
+    injected = _skill_injected(seen)
+    assert len(injected) == 1 and "long-document" in injected[0]
+    assert "document_size" in injected[0]
+
+
+def test_explicit_diagnosis_suppresses_shorter_debug_procedure(tmp_path):
+    rt, seen = _rt_shapes(tmp_path, [_final("done")])
+    _write_gate_skill(tmp_path, "diagnosing-bugs", "DEEP DIAGNOSIS")
+    skills_cache_clear()
+    out = asyncio.run(rt.run("Diagnose this flaky test and debug the parser"))
+    assert out["status"] == "ok"
+    injected = _skill_injected(seen)
+    assert len(injected) == 1 and "DEEP DIAGNOSIS" in injected[0]
+    assert _injected(seen) == []
+
+
+def test_disabled_skill_gate_loads_nothing(tmp_path):
+    _write_gate_skill(tmp_path, "pdf", "PDF BODY")
+    rt, seen = _gate_rt(tmp_path, [_final("done")])
+    rt.config["agent"] = {"skill_autoload": {"enabled": False}}
+    out = asyncio.run(rt.run(
+        "Read\n\n[Attached files]\n"
+        "- report.pdf (binary, 500 B) saved at /tmp/report.pdf"))
+    assert out["status"] == "ok"
+    assert _skill_injected(seen) == []
+
+
+def test_per_run_disabled_skill_is_not_autoloaded(tmp_path):
+    _write_gate_skill(tmp_path, "pdf", "PDF BODY")
+    rt, seen = _gate_rt(tmp_path, [_final("done")])
+    rt.skills = {}  # minimal fake runtime has no init-time catalog
+    out = asyncio.run(rt.run(
+        "Read\n\n[Attached files]\n"
+        "- report.pdf (binary, 500 B) saved at /tmp/report.pdf",
+        run_overrides={"disabled_skills": ["pdf"]}))
+    assert out["status"] == "ok"
+    assert _skill_injected(seen) == []
+
+
+def test_repeated_failure_loads_diagnosis_once(tmp_path):
+    import json
+
+    from runtime.tool_base import Tool, ToolResult
+    from tests.test_loop_regressions import _tc
+
+    class AlwaysFail(Tool):
+        name = "code.check"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, args, ctx):
+            return ToolResult(status="error", error="same assertion failed")
+
+    _write_gate_skill(tmp_path, "diagnosing-bugs", "DEEP DIAGNOSIS")
+    skills_cache_clear()
+    reg = _Registry(["skill.load"], real={"code.check": AlwaysFail()})
+    script = [
+        _tc("code.check", json.dumps({"command": "first"})),
+        _tc("code.check", json.dumps({"command": "second"})),
+        _tc("code.check", json.dumps({"command": "third"})),
+        _final("still failing"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["skills"] = {"dir": str(tmp_path / "skills")}
+    out = asyncio.run(rt.run("Fix the parser"))
+    assert out["status"] == "ok"
+    injected = _skill_injected(seen)
+    assert len(injected) == 1 and "DEEP DIAGNOSIS" in injected[0]
+    assert "repeated_failure" in injected[0]

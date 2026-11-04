@@ -151,6 +151,7 @@ def register(app, s):
                     "max_result_chars": _comp.get("max_result_chars", 2000),
                     "keep_last": _comp.get("keep_last", 3),
                     "architect_threshold": (runtime.config.get("architect") or {}).get("threshold", 0),
+                    "architect_mode": (runtime.config.get("architect") or {}).get("mode", "auto"),
                     "sampling": _samp,
                 },
                 "vision": bool(getattr(runtime, "vision_enabled", False)),

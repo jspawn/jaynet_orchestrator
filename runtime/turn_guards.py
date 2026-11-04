@@ -483,6 +483,44 @@ class WrapUpGuard(PreTurnGuard):
                       "type": "guard"})])
 
 
+class DiagnosticSkillGuard(PreTurnGuard):
+    """After the normal same-failure threshold, load the deeper diagnosis loop.
+
+    Runs once, before the next model turn, and never executes a tool itself.
+    Manual or start-of-run loads suppress the duplicate injection.
+    """
+    name = "diagnosing_skill"
+
+    def __init__(self, tctx: TurnGuardContext) -> None:
+        super().__init__(tctx)
+        try:
+            self.after = int(tctx.lg_cfg.get("failure_nudge_after", 3) or 0)
+        except (TypeError, ValueError):
+            self.after = 3
+        self.attempted = False
+
+    async def check(self, rs: RunState) -> PreTurnAction | None:
+        cfg = (self.tctx.agent_cfg.get("skill_autoload") or {})
+        if (self.attempted or self.tctx.depth != 0 or rs.wrap_up
+                or not cfg.get("enabled", True) or not self.after
+                or rs.fail_count < self.after
+                or "diagnosing-bugs" in rs.loaded_skills):
+            return None
+        self.attempted = True
+        from runtime.skill_gate import autoload_payload, render_autoload
+        payload = autoload_payload(
+            self.tctx.runtime, "diagnosing-bugs", allowed=rs.allowed,
+            disabled_skills=getattr(self.tctx.ctx, "disabled_skills", ()),
+            skill_additions=getattr(self.tctx.ctx, "skill_additions", {}))
+        if payload is None:
+            return None
+        rs.loaded_skills.add("diagnosing-bugs")
+        return PreTurnAction(
+            message=render_autoload(payload, "repeated_failure"),
+            events=[("skill_autoload", {
+                "skill": "diagnosing-bugs", "trigger": "repeated_failure"})])
+
+
 #: The pre-turn guard chain, in firing order (the historical order of the
 #: inline blocks at the top of the loop). ORDER IS LOAD-BEARING; append new
 #: guards, never reorder silently.
@@ -493,6 +531,7 @@ PRE_TURN_GUARDS: list[type[PreTurnGuard]] = [
     StallLadderGuard,
     DeliverableReminderGuard,
     WrapUpGuard,
+    DiagnosticSkillGuard,
 ]
 
 

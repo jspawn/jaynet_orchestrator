@@ -102,6 +102,9 @@ class RunSettings:
     # `architect` tool at/above this threshold. Per-run override (quick
     # settings) wins over the config default; 0 disables the gate.
     architect_threshold: int
+    # Mechanical routing: auto detects complex/risky requests, plan always
+    # stops at a handoff, direct skips discretionary planning.
+    architect_mode: str
     # Sampler params apply to the BRAIN only. A sub-agent on a different
     # model keeps its own server-preset sampling — None for those runs
     # unless run_overrides["sampling_force"] opted in explicitly.
@@ -273,6 +276,12 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     if eff_threshold is None:
         eff_threshold = (config.get("architect") or {}).get("threshold", 0)
     eff_threshold = _int(eff_threshold, 0)
+    architect_mode = str(_ro.get("architect_mode")
+                         or (config.get("architect") or {}).get("mode", "auto")).lower()
+    if architect_mode not in ("auto", "plan", "direct"):
+        architect_mode = "auto"
+    if architect_mode == "direct":
+        eff_threshold = 0
     # Sampler params apply to the BRAIN only. A sub-agent on a different
     # model (e.g. the specialist.delegate specialist) keeps its own
     # server-preset sampling — the brain's config defaults and per-run
@@ -364,7 +373,8 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
         eff_model=eff_model, run_overrides=_ro, budget_cfg=b_cfg, budget=budget,
         warn_fraction=warn_fraction, compaction=eff_compaction,
         compaction_every=compaction_every,
-        architect_threshold=eff_threshold, sampling=eff_sampling,
+        architect_threshold=eff_threshold, architect_mode=architect_mode,
+        sampling=eff_sampling,
         parallel=eff_parallel, lg_cfg=_lg, guard_max=guard_max,
         near_dup_threshold=near_dup_threshold, near_dup_tools=near_dup_tools,
         hard_block_after=hard_block_after,

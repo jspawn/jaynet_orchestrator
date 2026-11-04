@@ -883,6 +883,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 rs.badged = True
             if (name == "skill.load" and result.status == "ok"
                     and isinstance(args, dict)):
+                if args.get("name"):
+                    rs.loaded_skills.add(str(args["name"]))
                 _bsk = _badge_skill_name(self.config, args.get("name"))
                 if _bsk:
                     rs.badge_watch = _bsk
@@ -1006,7 +1008,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    token/cost events are emitted). The CLI leaves this False to
                    keep the proven non-streaming path.
         run_overrides: per-run flexing of compaction/parallel_tools/sampling/
-                   architect_threshold/timezone, plus "tools_patch" — per-run
+                   architect_threshold/architect_mode/timezone, plus "tools_patch" — per-run
                    overrides for the tools: config section (see
                    _patch_tools_config; the eval harness redirects memory/rag
                    stores into its sandbox this way) — and the internal
@@ -1153,6 +1155,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if (_f in _known and _f not in disabled_tools
                         and _f not in rs.allowed):
                     rs.allowed.append(_f)
+        # Mechanical plan gate: deterministic complex/risky requests force the
+        # architect into the toolset, then run it harness-side below. Unlike
+        # the legacy model-rated threshold, this cannot be talked past.
+        from runtime.plan_gate import prepare_architect
+        plan_decision = prepare_architect(
+            self, rs, user_message, depth=depth, mode=st.architect_mode,
+            threshold=st.architect_threshold, disabled_tools=disabled_tools)
         from runtime.tool_overrides import apply_schema as _apply_schema
         rs.tools_schema = _apply_schema(
             self.registry.openai_schemas(rs.allowed),
@@ -1415,14 +1424,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 auto_confirm=auto_confirm, run_id=run_id,
                 confirm_provider=confirm_provider)
 
+        from runtime.plan_gate import maybe_auto_architect
         from runtime.recall import prefetch_recall, raw_recall_query
         try:
+            auto_handled = await maybe_auto_architect(
+                self, plan_decision, user_message=user_message, depth=depth,
+                ctx=ctx, rs=rs, emit=emit)
             await prefetch_recall(
                 self, rs, ctx,
                 query=raw_recall_query(_ro.get("recall_query"), user_message),
                 collection=_ro.get("recall_collection"), depth=depth,
                 disabled_tools=disabled_tools, emit=emit, emit_cost=emit_cost)
-            while True:
+            while not auto_handled:
                 rs.budget.tick()
                 # In-place transcript compaction (opt-in, cadence-gated to
                 # amortize the prompt-cache break): _maybe_compact.
@@ -2272,6 +2285,30 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 await emit("route_decision", 0, _route_meta)
             if _nudge:
                 rs.messages.insert(-1, {"role": "system", "content": _nudge})
+            # Trusted attachment/size/diagnosis signals load instructions without
+            # waiting for the brain to discover them. No tools are auto-executed.
+            from runtime.skill_gate import autoload_payload, initial_skill_choices, render_autoload
+            _skill_cfg = ((self.config.get("agent") or {})
+                          .get("skill_autoload") or {})
+            if _skill_cfg.get("enabled", True):
+                _disabled = (run_overrides or {}).get("disabled_skills") or ()
+                _additions = (run_overrides or {}).get("skill_additions") or {}
+                _source = (run_overrides or {}).get("recall_query") or ""
+                for _name, _trigger in initial_skill_choices(
+                        user_message, source_message=_source,
+                        document_chars=int(_skill_cfg.get("document_chars", 12000))):
+                    if _name in rs.loaded_skills:
+                        continue
+                    _payload = autoload_payload(
+                        self, _name, allowed=rs.allowed,
+                        disabled_skills=_disabled, skill_additions=_additions)
+                    if _payload is None:
+                        continue
+                    rs.loaded_skills.add(_name)
+                    rs.messages.insert(-1, {"role": "system", "content":
+                                            render_autoload(_payload, _trigger)})
+                    await emit("skill_autoload", 0, {
+                        "skill": _name, "trigger": _trigger})
             # Procedure auto-selector: a request matching a procedure's shape
             # keywords gets that procedure's body just-in-time (same placement
             # as the nudge) instead of relying on the brain to skill.load it —
@@ -2280,8 +2317,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _proc = await self._procedure_autoload(
                 user_message, rs.allowed,
                 skill_additions=(run_overrides or {}).get("skill_additions"))
-            if _proc:
+            if _proc and not (_proc[0] == "debug-and-fix"
+                              and "diagnosing-bugs" in rs.loaded_skills):
                 rs.proc_name, _pbody, rs.proc_checkpoints = _proc
+                rs.loaded_skills.add(rs.proc_name)
                 rs.messages.insert(-1, {"role": "system", "content": (
                     f"Procedure auto-loaded for this request "
                     f"(skill: {rs.proc_name}) — follow its steps:\n\n{_pbody}")})

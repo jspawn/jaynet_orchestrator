@@ -662,6 +662,7 @@ def register(app, s):
               "sampling": prefs.get("sampling"),
               "sub_budget": prefs.get("sub_budget"),
               "architect_threshold": prefs.get("architect_threshold"),
+              "architect_mode": prefs.get("architect_mode"),
               "context_tokens": imp_ctxguard,
               # Per-user timezone for the system-prompt datetime; "" → config.
               "timezone": ("" if username == "_token"
@@ -1077,7 +1078,8 @@ def register(app, s):
                    "parallel_tools": req.parallel_tools,
                    "sampling": req.sampling,
                    "sub_budget": req.sub_budget,
-                   "architect_threshold": req.architect_threshold},
+                   "architect_threshold": req.architect_threshold,
+                   "architect_mode": req.architect_mode},
             extra_system=extra_system, extra_roots=extra_roots, images=images,
             run_overrides_extra={"recall_query": recall_query})
         return {"run_id": run_id}

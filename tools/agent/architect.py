@@ -4,7 +4,9 @@ Runs a five-stage pipeline, all as budget-bounded sub-agents over ctx.spawn:
 
   1. PLAN      the brain does a planning + architecture pass (read-only tools).
   2. REVIEW    the specialist model pokes holes in the plan and returns an explicit
-               verdict: agree / refine / disagree.
+               verdict: agree / refine / disagree. Optional EGM mode uses fresh
+               Goldfish comprehension, parallel adversarial reviews and a strict
+               implementation-readiness gate before any execution.
   3. ARBITRATE only if the reviewer *disagrees*: a cloud model is shown both
                approaches and picks one (or a hybrid) with a short rationale.
                If arbitration itself fails (unknown alias, cloud error), the
@@ -24,6 +26,7 @@ from __future__ import annotations
 import re
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.agent import egm
 from tools.agent.spawn import _resolve_spawn_model
 
 _PLAN_TOOLS = ["fs.read", "fs.list", "fs.grep", "code.tree", "code.symbols",
@@ -33,10 +36,7 @@ _EXEC_TOOLS = ["fs.read", "fs.list", "fs.grep", "fs.write", "fs.edit",
                "lint.run", "test.run", "git.status", "git.diff", "git.add", "git.commit",
                "skill.load", "skill.list", "note.set", "context.pin", "todos"]
 
-
-def _parse_stance(text: str) -> str:
-    m = re.search(r"STANCE:\s*(agree|refine|disagree)", text or "", re.I)
-    return m.group(1).lower() if m else "refine"   # unclear → treat as refine (safe middle)
+_parse_stance = egm.parse_stance
 
 
 def _parse_choice(text: str) -> str:
@@ -94,6 +94,10 @@ class Architect(Tool):
             "execute": {"type": "boolean",
                         "description": "Carry out the plan after the handoff (default true). "
                                        "False = produce the plan + HANDOFF.md only."},
+            "review": {"type": "string", "enum": ["standard", "egm"],
+                       "description": "standard = one specialist review; egm = independent "
+                                      "Goldfish comprehension, adversarial and readiness gates "
+                                      "(default: architect.review or standard)."},
         },
         "required": ["task"],
     }
@@ -109,6 +113,9 @@ class Architect(Tool):
                               error="architect needs sub-agent spawning, which isn't available here")
         do_exec = args.get("execute", True)
         cfg = (ctx.config.get("architect") or {})
+        review_mode = str(args.get("review") or cfg.get("review", "standard")).lower()
+        if review_mode not in ("standard", "egm"):
+            review_mode = "standard"
         # Stage models resolve like agent.spawn's: friendly aliases (gemini) map
         # to their LiteLLM alias, live serve.start'd aliases also resolve. An
         # unresolvable reviewer can't do its job — fail fast and loud rather
@@ -123,6 +130,9 @@ class Architect(Tool):
                                     "in config/runtime.yaml")
 
         _STAGE = {"plan": "Planning the approach …",
+                  "comprehension": "Goldfish comprehension check …",
+                  "goldfish": "Independent Goldfish reviews …",
+                  "readiness": "Goldfish implementation-readiness gate …",
                   "review": "Coder poking holes in the plan …",
                   "arbitrate": "Reviewer disagreed — asking a cloud model to decide …",
                   "refine": "Folding the review into the plan …",
@@ -133,7 +143,8 @@ class Architect(Tool):
             # live under the running architect call.
             try:
                 if getattr(ctx, "emit", None):
-                    await ctx.emit("progress", {"label": _STAGE.get(stage, stage)})
+                    label = _STAGE.get(stage, stage) + (f" ({info})" if info else "")
+                    await ctx.emit("progress", {"label": label})
             except Exception:
                 pass
 
@@ -143,12 +154,16 @@ class Architect(Tool):
         # the planner/executor don't burn iterations rediscovering the layout.
         from runtime.context_pack import coding_context
         pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
+        egm_sections = ("FILES: <exact paths to create/change>\n"
+                        "INTERFACES: <data structures and function/API signatures>\n"
+                        "ACCEPTANCE: <observable done criteria>\n"
+                        if review_mode == "egm" else "")
         plan = await ctx.spawn(
             "You are the ARCHITECT. Produce a concrete plan and architecture for the "
             "task below. Investigate as needed (read files, search), but do NOT write "
             "the final implementation. Output EXACTLY these labelled sections:\n"
             "GOAL: <one line>\nAPPROACH: <the approach and why>\n"
-            "KEY DECISIONS: <bullets>\nRISKS: <bullets>\n"
+            "KEY DECISIONS: <bullets>\nRISKS: <bullets>\n" + egm_sections +
             "UNITS: ordered small steps, one per line, in this format:\n"
             "  - <what + which files> | check: <shell command proving the unit, or ->\n\n"
             + (pack + "\n\n" if pack else "") +
@@ -159,19 +174,10 @@ class Architect(Tool):
             return ToolResult(status="error", result={"stage": "plan", "detail": plan},
                               tool_name=self.name, error="planning stage failed")
 
-        # ---- 2. REVIEW (poke holes) ----
-        await emit("review")
-        review = await ctx.spawn(
-            "You are a senior engineer REVIEWING an architect's plan. Your job is to "
-            "POKE HOLES — find flaws, missing cases, buildability problems, wrong "
-            "assumptions — NOT to redesign. Answer in EXACTLY this format:\n"
-            "STANCE: agree | refine | disagree\n"
-            "NOTES: <specific holes / concerns; empty if none>\n"
-            "ALTERNATIVE: <only if STANCE is disagree — your fundamentally different approach>\n\n"
-            f"TASK:\n{task}\n\nPLAN:\n{plan_text}",
-            tools=[], model=reviewer, name="reviewer")
-        review_text = (review.get("answer") or "").strip()
-        stance = _parse_stance(review_text)
+        # ---- 2. REVIEW: one specialist, or independent EGM Goldfish gates ----
+        plan_text, review_text, stance = await egm.review(
+            ctx, task, plan_text, reviewer, review_mode,
+            max(1, int(cfg.get("egm_reviewers", 2))), emit)
 
         # ---- 3. ARBITRATE (only on genuine disagreement) or REFINE ----
         arbitration = None
@@ -204,14 +210,34 @@ class Architect(Tool):
             await emit("refine", "folding review notes into the plan")
             rev = await ctx.spawn(
                 "Revise your plan to address this review. Keep the SAME labelled "
-                "sections (GOAL/APPROACH/KEY DECISIONS/RISKS/UNITS).\n\n"
+                "sections used by the plan above.\n\n"
                 f"PLAN:\n{plan_text}\n\nREVIEW:\n{review_text}",
                 tools=[], name="architect")
             final_plan = (rev.get("answer") or plan_text).strip()
 
+        readiness_text = None
+        if review_mode == "egm":
+            readiness_text = await egm.readiness_check(
+                ctx, task, final_plan, reviewer, emit)
+            if not egm.is_ready(readiness_text):
+                final_plan = await egm.revise_plan(ctx, final_plan, readiness_text)
+                second = await egm.readiness_check(
+                    ctx, task, final_plan, reviewer, emit)
+                readiness_text += "\n\nSECOND READINESS CHECK:\n" + second
+                if not egm.is_ready(second):
+                    handoff = self._build_handoff(
+                        task, final_plan, review_text, stance, arbitration,
+                        arb_error, readiness=readiness_text)
+                    return ToolResult(
+                        status="error", tool_name=self.name,
+                        error="Goldfish readiness gate: plan remains ambiguous",
+                        result={"stage": "readiness", "answer": final_plan,
+                                "handoff": handoff, "readiness": readiness_text})
+
         # ---- 4. HANDOFF ----
         handoff = self._build_handoff(task, final_plan, review_text, stance,
-                                      arbitration, arb_error)
+                                      arbitration, arb_error,
+                                      readiness=readiness_text)
 
         # The plan becomes the harness todo list (the ToDos side panel) — also
         # for execute:false runs, so a plan-only pass is still visible.
@@ -327,7 +353,7 @@ class Architect(Tool):
 
     @staticmethod
     def _build_handoff(task, final_plan, review_text, stance, arbitration,
-                       arb_error=None) -> str:
+                       arb_error=None, readiness=None) -> str:
         parts = ["# HANDOFF\n", "## Task\n" + task + "\n", "## Plan\n" + final_plan + "\n"]
         if stance == "disagree" and arbitration:
             choice = _parse_choice(arbitration)
@@ -349,6 +375,8 @@ class Architect(Tool):
                          + review_text + "\n")
         else:
             parts.append("## Review\nThe reviewer agreed with the plan.\n")
+        if readiness:
+            parts.append("## Goldfish readiness\n" + readiness + "\n")
         parts.append("## Execution\nWork through the UNITS in order. Run each unit's "
                      "done-check before proceeding. Keep context lean.\n")
         return "\n".join(parts)

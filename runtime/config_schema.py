@@ -268,6 +268,11 @@ class ProcedureSelectorConfig(_Section):
     }
 
 
+class SkillAutoloadConfig(_Section):
+    enabled: bool = True
+    document_chars: int = 12000
+
+
 class AnchorConfig(_Section):
     mode: str = "off"
     todos_reinject: str = "trailing"
@@ -321,6 +326,7 @@ class AgentConfig(_Section):
     }
     fresh_retry: FreshRetryConfig = FreshRetryConfig()
     procedure_selector: ProcedureSelectorConfig = ProcedureSelectorConfig()
+    skill_autoload: SkillAutoloadConfig = SkillAutoloadConfig()
     anchor: AnchorConfig = AnchorConfig()
     state_file: StateFileConfig = StateFileConfig()
     verify: AgentVerifyConfig = AgentVerifyConfig()

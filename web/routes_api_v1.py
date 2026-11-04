@@ -77,7 +77,8 @@ def register(app, s):
                    "parallel_tools": req.parallel_tools,
                    "sampling": req.sampling,
                    "sub_budget": req.sub_budget,
-                   "architect_threshold": req.architect_threshold},
+                   "architect_threshold": req.architect_threshold,
+                   "architect_mode": req.architect_mode},
             images=images)
         return {"run_id": run_id, "v": PROTOCOL_VERSION}
 

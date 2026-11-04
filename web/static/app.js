@@ -391,6 +391,7 @@ async function loadMe(){
     pw("#sSeed",null,smp.seed);
     pw("#cMaxChars",null,rd.max_result_chars); pw("#cKeepLast",null,rd.keep_last);
     pw("#aThresh",null,rd.architect_threshold);
+    if($("#aPlanMode")) $("#aPlanMode").value=rd.architect_mode||"";
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
     // Impersonator badge (/imp): visible on every device while an override lives.
     const imp=me.brain_override||{}, ic=$("#impChip");
@@ -412,9 +413,13 @@ function subBudgetOverride(){
 }
 
 // Per-run budget overrides. Blank field => no override (server config default is used).
-function archThreshold(){   // planning complexity gate (0-4, 0=off); null falls back to server default
+function archThreshold(){   // legacy model-rated planning nudge (0-4, 0=off)
   const n=parseInt($("#aThresh").value,10);
   return (Number.isFinite(n) && n>=0 && n<=4) ? n : null;
+}
+function archMode(){
+  const m=$("#aPlanMode")?.value;
+  return ["auto","plan","direct"].includes(m) ? m : null;
 }
 function budgetOverrides(){
   const o={};
@@ -1841,7 +1846,7 @@ async function sendNow(msg, atts){
     history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), architect_mode:archMode(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   // Terminal error states (FE-3): an expired session, an oversized prompt or
   // any non-OK response carries NO run_id — without this the UI opened a
   // stream for "undefined" and spun "running…" forever with the prompt gone.
@@ -2774,7 +2779,7 @@ async function init(){
 
   ["share","auto","think","sTemp","sTopP","sTopK","sRepeat","sSeed",
    "bMaxIter","bWall","bCost","bTok","bSubIter",
-   "cCompact","cMaxChars","cKeepLast","cParallel"].forEach(id=>{
+   "cCompact","cMaxChars","cKeepLast","cParallel","aPlanMode","aThresh"].forEach(id=>{
     const el=$("#"+id);
     if(el) el.addEventListener("change", ()=>{ _dirty.add(id); saveSettings(); });
   });

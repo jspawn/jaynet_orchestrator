@@ -1042,8 +1042,8 @@ _SKILL_BODY_CAP = 1500      # chars per skill body handed to the judge
 
 
 def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
-    """Skills actually loaded by successful skill.load calls or the procedure
-    autoloader. Trace absence degrades to no skill-state claim, never a guess."""
+    """Skills actually loaded by successful skill.load calls or deterministic
+    autoloaders. Trace absence degrades to no skill-state claim, never a guess."""
     ids = [r for r in run_ids if r]
     if not ids:
         return set()
@@ -1056,8 +1056,8 @@ def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
             marks = ",".join("?" * len(ids))
             rows = con.execute(
                 f"SELECT kind, payload_json FROM events "
-                f"WHERE kind IN ('tool_result', 'procedure_autoload') "
-                f"AND run_id IN ({marks})", ids).fetchall()
+                f"WHERE kind IN ('tool_result', 'procedure_autoload', "
+                f"'skill_autoload') AND run_id IN ({marks})", ids).fetchall()
         finally:
             con.close()
     except Exception:
@@ -1069,7 +1069,7 @@ def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
         except Exception:
             continue
         name = None
-        if kind == "procedure_autoload":
+        if kind in ("procedure_autoload", "skill_autoload"):
             name = d.get("skill")
         elif d.get("tool") == "skill.load" and d.get("status") == "ok":
             name = (d.get("args") or {}).get("name")
@@ -2207,6 +2207,12 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
         if early is not None:
             return early
         tools_patch = run_overrides["tools_patch"]
+        # Intentional control arms strip architect by design. Do not let the
+        # mechanical plan gate fail those runs closed — direct mode preserves
+        # the brain-only/bash-only comparison the variant explicitly asked for.
+        if ((variant or {}).get("harness") == "brain"
+                or (variant or {}).get("tools_only") is not None):
+            run_overrides["architect_mode"] = "direct"
         if variant and variant.get("sampling"):
             run_overrides["sampling"] = dict(variant["sampling"])
             # Cross-model variants must still get the pinned sampling —

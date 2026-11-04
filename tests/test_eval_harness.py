@@ -515,9 +515,11 @@ def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     store = EvalStore(tmp_path / "eval.db")
     run(eval_runner.run_case(rt, _case(), store,
                              variant={"label": "v", "harness": "brain"}))
-    tools = rt.calls[0][1]["tools"]
+    kwargs = rt.calls[0][1]
+    tools = kwargs["tools"]
     for t in ("specialist.delegate", "architect", "agent.spawn"):
         assert t not in tools
+    assert kwargs["run_overrides"]["architect_mode"] == "direct"
     store.close()
 
     rt2 = _FakeRuntime(["ok"])
@@ -2226,6 +2228,7 @@ def test_run_case_auto_fixed_tools_only_takes_precedence(tmp_path):
     kwargs = rt.calls[0][1]
     assert kwargs["tools"] == ["fs.read"]
     assert kwargs["disabled_tools"] is None
+    assert kwargs["run_overrides"]["architect_mode"] == "direct"
     assert "mode" not in kwargs["run_overrides"]["config_patch"]["tool_selection"]
     store.close()
 

@@ -186,6 +186,15 @@ EVENTS: dict[str, EventSpec] = {
     "procedure_autoload": EventSpec(
         required=_s("skill"),
         doc="a procedure was auto-loaded for this request"),
+    "skill_autoload": EventSpec(
+        required=_s("skill", "trigger"),
+        doc="a format, long-document or diagnostic skill was auto-loaded"),
+    "plan_gate": EventSpec(
+        required=_s("action", "reason") | {"mandatory": (bool,)},
+        doc="deterministic complex/risky request routed to plan-first"),
+    "architect_autostart": EventSpec(
+        required=_s("action", "status", "reason"),
+        doc="harness-side architect run triggered by the plan gate"),
     "strength_gate": EventSpec(
         required=_s("tag"),
         optional={"mode": _StrOpt, "alias": _StrOpt, "preset": _StrOpt},

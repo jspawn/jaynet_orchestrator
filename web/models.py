@@ -18,7 +18,8 @@ class ChatRequest(BaseModel):
     parallel_tools: dict | None = None       # per-run parallel-execution override
     sampling: dict | None = None             # per-run sampler override (temperature, top_p, …)
     sub_budget: dict | None = None           # per-run sub-agent (agent.spawn) budget override
-    architect_threshold: int | None = None    # complexity gate (1-10); 0/None uses config default
+    architect_threshold: int | None = None    # legacy complexity nudge (0-4); None uses config default
+    architect_mode: str | None = None         # auto | plan | direct; None uses config default
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files

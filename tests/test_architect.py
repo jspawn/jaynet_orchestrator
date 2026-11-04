@@ -109,3 +109,48 @@ def test_reviewer_uses_specialist_model():
     ctx = _Ctx("agree")
     _run(ctx, {"task": "x"})
     assert next(c for c in ctx.calls if c["name"] == "reviewer")["model"] == "local-specialist"
+
+
+class _EgmCtx(_Ctx):
+    def __init__(self, ready=True):
+        super().__init__("agree")
+        self._ready = ready
+
+    async def spawn(self, task, **kwargs):
+        name = kwargs.get("name")
+        if name == "goldfish-comprehension":
+            self.calls.append({"name": name, "model": kwargs.get("model"),
+                               "todos_sync": False, "task": task})
+            return {"status": "ok", "answer": "UNDERSTANDING: same\nREADY: yes\nQUESTIONS: none"}
+        if name and name.startswith("goldfish-"):
+            self.calls.append({"name": name, "model": kwargs.get("model"),
+                               "todos_sync": False, "task": task})
+            if name == "goldfish-readiness":
+                answer = "READY: yes\nMISSING: none" if self._ready else "READY: no\nMISSING: signatures"
+            else:
+                answer = "STANCE: agree\nNOTES:"
+            return {"status": "ok", "answer": answer}
+        return await super().spawn(task, **kwargs)
+
+
+def test_egm_runs_independent_gates_then_executes():
+    ctx = _EgmCtx(ready=True)
+    r = _run(ctx, {"task": "build X", "review": "egm"})
+    assert [c["name"] for c in ctx.calls] == [
+        "architect", "goldfish-comprehension", "goldfish-1", "goldfish-2",
+        "goldfish-readiness", "executor"]
+    assert r.status == "ok" and r.result["executed"] is True
+    assert "Goldfish readiness" in r.result["handoff"]
+    assert all(c["model"] == "local-specialist" for c in ctx.calls
+               if c["name"].startswith("goldfish-"))
+
+
+def test_egm_readiness_failure_never_executes():
+    ctx = _EgmCtx(ready=False)
+    r = _run(ctx, {"task": "build X", "review": "egm"})
+    assert [c["name"] for c in ctx.calls] == [
+        "architect", "goldfish-comprehension", "goldfish-1", "goldfish-2",
+        "goldfish-readiness", "architect", "goldfish-readiness"]
+    assert r.status == "error" and r.result["stage"] == "readiness"
+    assert "executor" not in [c["name"] for c in ctx.calls]
+    assert "SECOND READINESS CHECK" in r.result["handoff"]

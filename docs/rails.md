@@ -18,6 +18,7 @@ Fire at turn start, after the compaction pass, before the model call.
 | 4 | `stall_check` | pre_turn | `agent.stall_check.enabled / .after` | true / 2 | Stall ladder: enough consecutive no-progress turns → inject the next rung's directive. | bakeoff: 14+ tool calls over 47 minutes past the final warning |
 | 5 | `deliverable_warn` | pre_turn | `agent.deliverable_check.enabled / .warn_at` | true / 0.75 | Deliverable early warning: enough iterations remain to still write the files (>= 2), task-named files don't exist yet → remind once. | — |
 | 6 | `wrap_up` | pre_turn | `loop_guard.max_rejections` | 6 | Loop-guard escalation: after guard_max refusals — or an unsalvageable stall hard-stop streak (loop_guard.auto_… | live: gaia-65afbc8a wasted its only wrap-up turn on exactly that |
+| 7 | `diagnosing_skill` | pre_turn | `agent.skill_autoload.enabled (+ loop_guard.failure_nudge_after)` | true (+ 3) | After the normal same-failure threshold, load the deeper diagnosis loop. | — |
 
 ## Tool-call gates (runtime/dispatch_guards.py — not registry guards)
 

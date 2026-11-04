@@ -62,8 +62,9 @@ two release cuts shipped this block one version behind — audit #24/#25 D1.)
 `history` is optional and client-managed; omit it for a stateless turn.
 Advanced per-run overrides (`tools`, `budget_overrides`, `sampling`,
 `compaction`, `parallel_tools`, `sub_budget`, `architect_threshold`,
-`share_private`, `auto_confirm`, `attachments`) mirror the web quick
-settings — optional, ignore them unless you know you need them.
+`architect_mode`, `share_private`, `auto_confirm`, `attachments`) mirror the
+web quick settings — optional, ignore them unless you know you need them.
+`architect_mode` is `auto`, `plan`, or `direct`.
 Messages starting with `/` are slash commands (`/goal`, `/compact`, …) and
 also return `{"run_id"}`. `/selftest` shows help without a model;
 `/selftest all|tools|skills|<names…>` starts a scoped agent self-test.
@@ -163,7 +164,7 @@ types are exhaustive for `v: 1`:
 | sub-agents | `subagent_start`, `subagent_finish`, `subcall`, `auto_delegate` |
 | human-in-the-loop | `confirmation`, `confirmation_request`, `questions_request` |
 | progress/planning | `progress` (free-form), `todos`, `ledger_check`, `badge`, `compaction` |
-| routing/setup | `route_decision` (free-form), `procedure_autoload`, `strength_gate` |
+| routing/setup | `route_decision` (free-form), `procedure_autoload`, `skill_autoload`, `plan_gate`, `architect_autostart`, `strength_gate` |
 | guard telemetry | `guard_fired` (uniform per-rail) plus the rails' own events: `budget_warning`, `context_warning`, `stall_check`, `stall_hard_stop`, `deliverable_warn`, `repeat_blocked`, `fresh_retry`, `bounce_cap`, `requirements_gate`, `deliverable_check`, `verify_check`, `just_reply_check`, `procedure_check`, `markup_leak`, `empty_final`, `model_turn_capped`, `model_turn_truncated` |
 | verify gate | `verify`, `verify_giveup` |
 
