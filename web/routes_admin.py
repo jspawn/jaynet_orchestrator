@@ -1203,23 +1203,30 @@ def register(app, s):
     # ---- admin: update check (report-only; runtime/update_check.py) ----
     @app.get("/api/admin/updates")
     async def admin_updates(refresh: int = 0):
-        """Installed vs upstream versions for the external components (h5i,
-        jevify, litellmenv, llama.cpp binaries) — the Admin → Status & Usage → Overview Updates
-        card. Never auto-updates; results cache 24h, refresh=1 forces a
-        fresh probe (updates.enabled: false closes the endpoint)."""
+        """Installed vs upstream versions for active/installed components —
+        the Admin → Status & Usage → Overview Updates card. Never auto-updates;
+        results cache 24h, refresh=1 forces a fresh probe
+        (updates.enabled: false closes the endpoint)."""
         if not ((runtime.config.get("updates") or {}).get("enabled", True)):
             return {"enabled": False, "components": []}
         import os as _os
 
         from runtime import paths as _rp
         from runtime import update_check
-        bins = [e.get("path") or "" for e in _store().get_binaries().values()]
+        entries = list(_store().get_binaries().values())
+        by_type = {f"{kind}_bins": [e.get("path") or "" for e in entries
+                                   if (e.get("type") or "llama") == kind]
+                   for kind in ("llama", "vllm", "radiance")}
         # The launcher's implicit fallback for presets without a binary
         # (start-model.sh: $LLAMA_BIN → $JAYNET_HOME/bin/llama-server).
-        bins.append(_os.environ.get("LLAMA_BIN", "").strip()
-                    or str(_rp.HOME / "bin" / "llama-server"))
+        by_type["llama_bins"].append(
+            _os.environ.get("LLAMA_BIN", "").strip()
+            or str(_rp.HOME / "bin" / "llama-server"))
+        plugins = runtime.config.get("plugins") or {}
         return await update_check.check_updates(
-            llama_bins=bins, refresh=bool(refresh))
+            **by_type, h5i_active=bool((plugins.get("h5i") or {}).get("enabled")),
+            jev_active=bool((plugins.get("jev") or {}).get("enabled")),
+            refresh=bool(refresh))
 
     # ---- admin: service restart (whitelisted user units only — the names are
     # constants here, never request data) ----

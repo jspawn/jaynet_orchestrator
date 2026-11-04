@@ -1,13 +1,13 @@
 """Update check (Admin → Status & Usage → Overview; GET /api/admin/updates).
 
-Report-only: compares the INSTALLED versions of the external components —
-the h5i browser binary, the jevify uv tool, the litellmenv proxy venv, the
-llama.cpp server binaries — against upstream (PyPI JSON, GitHub releases)
-and returns an upgrade hint per component. Never auto-updates, never
-raises: every probe degrades to status "unknown" (or "missing" when the
-component isn't installed at all). Outbound calls happen only when an
-admin opens/refreshes the card; results cache to DATA/update_check.json
-for 24h (refresh=1 bypasses) so the Status tab doesn't hammer upstream.
+Report-only: compares active/installed components — h5i, jevify, litellmenv,
+and llama.cpp/vLLM/radiance server binaries — against upstream (PyPI JSON,
+GitHub/Codeberg tags) and returns an upgrade hint per component. Missing,
+inactive components are omitted; an active plugin with a missing binary gets
+a "missing" row. Never auto-updates, never raises: failed probes degrade to
+"unknown". Outbound calls happen only when an admin opens/refreshes the card;
+results cache per availability scope to DATA/update_check.json for 24h
+(refresh=1 bypasses) so the Status tab doesn't hammer upstream.
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ _GITHUB_H5I = "https://api.github.com/repos/h5i-dev/h5i/releases/latest"
 # asset-less or non-b tag (same reason quickstart walks the list) — the
 # update check takes the newest b#### tag from the recent releases.
 _GITHUB_LLAMA = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
+_CODEBERG_RADIANCE = "https://codeberg.org/api/v1/repos/StillDeadcode/radiance/tags"
 _PYPI = "https://pypi.org/pypi/{}/json"
 
 
@@ -96,8 +97,27 @@ async def _version_of(name: str) -> str | None:
     return None
 
 
-async def _h5i() -> dict:
-    installed = await _version_of("h5i")
+def _existing(bins: list[str] | None) -> list[str]:
+    return [b for b in dict.fromkeys(bins or []) if b and Path(b).exists()]
+
+
+def _release_key(v: str) -> tuple:
+    """Three-part release key, ignoring rc/dev/git-describe suffixes."""
+    return _ver_tuple(v)[:3]
+
+
+def _release_status(installed: str | None, latest: str | None) -> str:
+    if not installed:
+        return "missing"
+    if not latest:
+        return "unknown"
+    inst, lat = _release_key(installed), _release_key(latest)
+    if len(inst) != 3 or len(lat) != 3:
+        return "unknown"
+    return "behind" if inst < lat else "current"
+
+
+async def _h5i(installed: str | None) -> dict:
     rel = await _fetch_json(_GITHUB_H5I)
     latest = (rel or {}).get("tag_name")
     return {"component": "h5i (browser plugin)",
@@ -107,8 +127,7 @@ async def _h5i() -> dict:
                     "curl -fsSL https://h5i.dev/install.sh | sh"}
 
 
-async def _jevify() -> dict:
-    installed = await _version_of("jevify")
+async def _jevify(installed: str | None) -> dict:
     meta = await _fetch_json(_PYPI.format("jevify"))
     latest = ((meta or {}).get("info") or {}).get("version")
     return {"component": "jevify (jev plugin sidecar)",
@@ -117,15 +136,15 @@ async def _jevify() -> dict:
             "hint": "uv tool upgrade jevify"}
 
 
-async def _litellm() -> dict:
-    installed = None
+async def _litellm() -> dict | None:
     py = paths.HOME / "litellmenv" / "bin" / "python"
-    if py.exists():
-        out = await asyncio.to_thread(
-            _run_stdout, [str(py), "-c",
-                          "import importlib.metadata as m; "
-                          "print(m.version('litellm'))"])
-        installed = out if out and re.match(r"^\d", out) else None
+    if not py.exists():
+        return None
+    out = await asyncio.to_thread(
+        _run_stdout, [str(py), "-c",
+                      "import importlib.metadata as m; "
+                      "print(m.version('litellm'))"])
+    installed = out if out and re.match(r"^\d", out) else None
     pinned = None
     lock = paths.HOME / "requirements-litellm.lock"
     if lock.exists():
@@ -151,15 +170,16 @@ async def _litellm() -> dict:
                     "then restart litellm-proxy"}
 
 
-async def _llama(llama_bins: list[str]) -> dict:
+async def _llama(llama_bins: list[str]) -> dict | None:
     """Oldest build among the registered llama.cpp binaries is the lagging
     one; per-binary builds land in `detail`. Latest is upstream's newest
     b-tag (the build helper rebuilds against a pin — behind-upstream is
     informational, behind-the-pin is what matters)."""
+    bins = _existing(llama_bins)
+    if not bins:
+        return None
     builds: dict[str, str] = {}
-    for b in dict.fromkeys(llama_bins or []):
-        if not b or not Path(b).exists():
-            continue
+    for b in bins:
         out = await asyncio.to_thread(_run_stdout, [b, "--version"])
         m = re.search(r"build (\d+)", out or "")
         if m:
@@ -182,22 +202,88 @@ async def _llama(llama_bins: list[str]) -> dict:
                     "restart the model servers to pick up the new binary"}
 
 
+async def _vllm(vllm_bins: list[str]) -> dict | None:
+    bins = _existing(vllm_bins)
+    if not bins:
+        return None
+    builds: dict[str, str] = {}
+    for b in bins:
+        out = await asyncio.to_thread(_run_stdout, [b, "--version"])
+        m = re.search(r"\d+\.\d+\.\d+[A-Za-z0-9.+_-]*", out or "")
+        if m:
+            builds[b] = m.group(0)
+    installed = min(builds.values(), key=_release_key) if builds else None
+    meta = await _fetch_json(_PYPI.format("vllm"))
+    latest = ((meta or {}).get("info") or {}).get("version")
+    return {"component": "vLLM servers",
+            "installed": installed, "latest": latest,
+            "status": _release_status(installed, latest), "detail": builds,
+            "hint": "run scripts/build_tools.sh vllm rocm, then restart the "
+                    "vLLM model servers"}
+
+
+async def _radiance(radiance_bins: list[str]) -> dict | None:
+    bins = _existing(radiance_bins)
+    if not bins:
+        return None
+    # radiance intentionally has no --version flag. The build helper installs
+    # radiance.rocm-<git describe> and points the stable registry path at it.
+    builds: dict[str, str] = {}
+    for b in bins:
+        resolved = str(Path(b).resolve())
+        m = re.search(r"radiance\.[^/]+-(v\d+\.\d+\.\d+"
+                      r"(?:-\d+-g[0-9a-f]+)?)", resolved)
+        if m:
+            builds[b] = m.group(1)
+    installed = min(builds.values(), key=_release_key) if builds else None
+    rel = await _fetch_json(_CODEBERG_RADIANCE)
+    tags: list = rel if isinstance(rel, list) else []
+    versions = [str(r.get("name") or "") for r in tags]
+    versions = [v for v in versions if re.fullmatch(r"v\d+\.\d+\.\d+", v)]
+    latest = max(versions, key=_release_key) if versions else None
+    return {"component": "radiance servers",
+            "installed": installed, "latest": latest,
+            "status": _release_status(installed, latest), "detail": builds,
+            "hint": "run scripts/build_tools.sh radiance rocm, then restart "
+                    "the radiance model servers"}
+
+
 async def check_updates(llama_bins: list[str] | None = None,
-                        refresh: bool = False) -> dict:
-    """The full report. Cached for 24h unless refresh=True. Never raises."""
+                        refresh: bool = False, *,
+                        vllm_bins: list[str] | None = None,
+                        radiance_bins: list[str] | None = None,
+                        h5i_active: bool = False, jev_active: bool = False) -> dict:
+    """Installed components only, cached per availability scope for 24h."""
+    h5i_installed, jev_installed = await asyncio.gather(
+        _version_of("h5i"), _version_of("jevify"))
+    llama_paths = _existing(llama_bins)
+    vllm_paths = _existing(vllm_bins)
+    radiance_paths = _existing(radiance_bins)
+    scope = {"llama": llama_paths, "vllm": vllm_paths,
+             "radiance": radiance_paths,
+             "litellm_installed": (paths.HOME / "litellmenv" / "bin" / "python").exists(),
+             "h5i_active": h5i_active, "jev_active": jev_active,
+             "h5i_installed": h5i_installed, "jev_installed": jev_installed}
     if not refresh:
         try:
             cached = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-            if time.time() - float(cached.get("checked_at") or 0) \
+            if cached.get("scope") == scope and \
+                    time.time() - float(cached.get("checked_at") or 0) \
                     < CACHE_MAX_AGE_S:
                 return cached
         except Exception:
             pass
-    components = await asyncio.gather(
-        _h5i(), _jevify(), _litellm(), _llama(llama_bins or []))
+    probes: list = []
+    if h5i_active or h5i_installed:
+        probes.append(_h5i(h5i_installed))
+    if jev_active or jev_installed:
+        probes.append(_jevify(jev_installed))
+    probes += [_litellm(), _llama(llama_paths), _vllm(vllm_paths),
+               _radiance(radiance_paths)]
+    components = [c for c in await asyncio.gather(*probes) if c is not None]
     out = {"enabled": True, "checked_at": time.time(),
            "checked_at_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
-           "components": list(components)}
+           "scope": scope, "components": components}
     try:
         CACHE_PATH.write_text(json.dumps(out), encoding="utf-8")
     except Exception as e:

@@ -34,10 +34,14 @@ async def _fake_fetch(url):
         # a list now (releases?per_page=15): the newest B-TAG wins, an
         # asset-less/non-b tag ahead of it is skipped
         return [{"tag_name": "v0.5.0"}, {"tag_name": "b11300"}]
+    if "radiance" in url:
+        return [{"name": "v1.16.0"}, {"name": "v1.15.1"}]
     if "jevify" in url:
         return {"info": {"version": "0.1.0"}}
     if "litellm" in url:
         return {"info": {"version": "1.103.1"}}
+    if "vllm" in url:
+        return {"info": {"version": "0.32.1"}}
     return None
 
 
@@ -49,6 +53,8 @@ def _fake_run(cmd, timeout=15):
         return "jevify 0.1.0"
     if "litellmenv" in exe:
         return "1.102.1"
+    if exe.endswith("/vllm"):
+        return "vllm version 0.30.0"
     return "version: 0.5.0-dev (build 11280, commit abc)"   # llama --version
 
 
@@ -69,8 +75,15 @@ def test_ver_tuple_and_status():
 async def test_check_updates_statuses(tmp_path):
     llama = tmp_path / "llama-server"
     llama.write_text("")
+    vllm = tmp_path / "vllm"
+    vllm.write_text("")
+    radiance = tmp_path / "radiance.rocm-v1.10.0-57-gcb5a69a" / "bin" / "radiance"
+    radiance.parent.mkdir(parents=True)
+    radiance.write_text("")
     FETCHES.clear()
-    out = await uc.check_updates(llama_bins=[str(llama)], refresh=True)
+    out = await uc.check_updates(
+        llama_bins=[str(llama)], vllm_bins=[str(vllm)],
+        radiance_bins=[str(radiance)], refresh=True)
     by = {c["component"]: c for c in out["components"]}
     assert by["h5i (browser plugin)"]["status"] == "behind"      # 0.4.1 < 0.4.7
     assert by["jevify (jev plugin sidecar)"]["status"] == "current"
@@ -79,6 +92,25 @@ async def test_check_updates_statuses(tmp_path):
     ll = by["llama.cpp servers"]
     assert ll["status"] == "behind" and ll["installed"] == "b11280"
     assert ll["detail"] == {str(llama): "b11280"}
+    vl = by["vLLM servers"]
+    assert vl["status"] == "behind" and vl["installed"] == "0.30.0"
+    rad = by["radiance servers"]
+    assert rad["status"] == "behind"
+    assert rad["installed"] == "v1.10.0-57-gcb5a69a"
+    assert rad["latest"] == "v1.16.0"
+
+
+@pytest.mark.asyncio
+async def test_watchers_follow_plugin_and_binary_availability(monkeypatch):
+    async def not_installed(name):
+        return None
+    monkeypatch.setattr(uc, "_version_of", not_installed)
+    out = await uc.check_updates(refresh=True)
+    assert {c["component"] for c in out["components"]} == {"litellm proxy (litellmenv)"}
+    out = await uc.check_updates(h5i_active=True, refresh=True)
+    by = {c["component"]: c for c in out["components"]}
+    assert by["h5i (browser plugin)"]["status"] == "missing"
+    assert "jevify (jev plugin sidecar)" not in by
 
 
 @pytest.mark.asyncio
@@ -106,6 +138,16 @@ async def test_cache_and_refresh():
     assert second["checked_at"] == first["checked_at"]
     await uc.check_updates(llama_bins=[], refresh=True)
     assert len(FETCHES) > n, "refresh=1 bypasses the cache"
+
+
+@pytest.mark.asyncio
+async def test_cache_invalidates_when_a_binary_appears(tmp_path):
+    vllm = tmp_path / "vllm"
+    first = await uc.check_updates(vllm_bins=[str(vllm)], refresh=True)
+    assert "vLLM servers" not in {c["component"] for c in first["components"]}
+    vllm.write_text("")
+    second = await uc.check_updates(vllm_bins=[str(vllm)])
+    assert "vLLM servers" in {c["component"] for c in second["components"]}
 
 
 @pytest.mark.asyncio
