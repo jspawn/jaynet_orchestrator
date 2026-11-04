@@ -406,6 +406,8 @@ class ModelsConfig(_Section):
         "creative": "creative and everyday writing — stories, poems, "
                     "emails, letters, messages, speeches, tone-sensitive "
                     "rewrites",
+        "dom-analysis": "DOM and raw-HTML analysis — page structure, "
+                        "selectors, markup-level evidence",
         "multi-step": "multi-step reasoning chains, puzzles, long "
                       "sequential computations",
         "osint": "open-source intelligence, threat intel, investigative "
@@ -415,6 +417,8 @@ class ModelsConfig(_Section):
         "research": "literature and web research, analysis, synthesis",
         "security": "security research, exploit analysis, pentesting",
         "vision": "image understanding",
+        "visual-web": "rendered-page understanding — screenshots, visual "
+                      "layout, indentation, positioning",
     }
     presets: dict[str, Any] = {
         "brain": {"alias": "local-orchestrator", "gpu": "0", "port": 8090,

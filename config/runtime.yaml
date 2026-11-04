@@ -661,6 +661,8 @@ models:
     reasoning: "math, logic, planning, tricky deduction"
     security: "security research, exploit analysis, pentesting"
     vision: "image understanding"
+    visual-web: "rendered-page understanding — screenshots, visual layout, indentation, positioning"
+    dom-analysis: "DOM and raw-HTML analysis — page structure, selectors, markup-level evidence"
     multi-step: "multi-step reasoning chains, puzzles, long sequential computations"
     creative: "creative and everyday writing — stories, poems, emails, letters, messages, speeches, tone-sensitive rewrites"
     osint: "open-source intelligence, threat intel, investigative research — source grading, attribution, geolocation, passive recon"
