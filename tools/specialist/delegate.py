@@ -89,6 +89,46 @@ async def _progress(ctx: ToolContext, label: str, *, ok: bool | None = None) -> 
     except Exception:
         pass  # the feed is cosmetic — never break a delegation over it
 
+
+async def _generation_probe(preset: dict, served_model: str,
+                            wait_s: float) -> str | None:
+    """Require one tiny generation directly from the swapped backend.
+
+    /v1/models proves only that the process answers. This catches a backend that
+    is listening but cannot generate yet, without involving LiteLLM fallbacks.
+    Returns None on success or the original, bounded error text on failure.
+    """
+    import httpx
+
+    from runtime.preset_store import remote_key
+    from tools.model.catalog import _probe_base
+
+    base = _probe_base(preset)
+    key = remote_key(preset)
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    body = {"model": served_model or preset.get("served_id") or "default",
+            "max_tokens": 4, "temperature": 0,
+            "messages": [{"role": "user", "content": "Reply with OK."}]}
+    deadline = time.monotonic() + max(0.0, wait_s)
+    error = "generation probe did not run"
+    while True:
+        remaining = max(0.1, deadline - time.monotonic())
+        try:
+            async with httpx.AsyncClient(timeout=min(30.0, remaining)) as client:
+                response = await client.post(
+                    f"{base}/v1/chat/completions", json=body, headers=headers)
+            if response.status_code == 200 and response.json().get("choices"):
+                return None
+            error = (f"HTTP {response.status_code}: {response.text[:800]}"
+                     if response.status_code != 200
+                     else "HTTP 200 without completion choices")
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"[:1000]
+        if time.monotonic() >= deadline:
+            return error
+        await asyncio.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
+
+
 # Sensible default tool-set for a coding child: navigate, edit, verify, checkpoint.
 _DEFAULT_CODING_TOOLS = [
     "fs.read", "fs.list", "fs.grep", "fs.write", "fs.edit",
@@ -568,7 +608,9 @@ class SpecialistDelegate(Tool):
             wanted=str(args.get("strength") or cfg.get("strength") or "coding"),
             model=args.get("model") or cfg.get("model"),  # explicit wins
         )
-        await self._route_model(run)
+        route_error = await self._route_model(run)
+        if route_error is not None:
+            return route_error
         err = self._resolve_tools_budget_verify(run)
         if err is not None:
             return err
@@ -587,11 +629,8 @@ class SpecialistDelegate(Tool):
         await self._review_result(run)
         return await self._assemble_result(run)
 
-    async def _route_model(self, run: _DelegateRun) -> None:
-        """Phase — model routing by preset strengths: an explicit/configured
-        alias wins; otherwise route to the specialist tagged with the wanted
-        strength, swapping a tagged-but-stopped LOCAL preset onto its slot
-        (and confirming the load) before falling back to the allround route."""
+    async def _route_model(self, run: _DelegateRun) -> ToolResult | None:
+        """Route by strength; a failed generation probe stops before spawning."""
         model = run.model
         if model is None:
             # Model priority by strengths (preset tags): work belongs on the
@@ -644,13 +683,41 @@ class SpecialistDelegate(Tool):
                         await asyncio.sleep(2.0)
                     ok = bool(confirm)
                 if ok:
+                    from tools.model.catalog import live_slot, restore_evicted
+                    preset_cfg = ((run.ctx.config.get("models") or {})
+                                  .get("presets") or {}).get(plan["preset"]) or {}
+                    slot = await live_slot(run.ctx.config)
+                    served = (slot or {}).get("serving") or preset_cfg.get("served_id") or ""
+                    try:
+                        probe_wait_s = float(run.cfg.get("generation_probe_wait_s", 60))
+                    except (TypeError, ValueError):
+                        probe_wait_s = 60.0
+                    probe_error = await _generation_probe(
+                        preset_cfg, served, max(0.0, probe_wait_s))
+                    if probe_error is not None:
+                        # Preserve the ORIGINAL backend failure and fail closed.
+                        # Never spawn through a proxy fallback to the evicted brain.
+                        log.warning("post-swap generation probe failed for '%s': %s",
+                                    plan["preset"], probe_error)
+                        notes = await restore_evicted(run.ctx, run.evicted)
+                        run.evicted = []
+                        run.swap_back_note = "; ".join(notes)
+                        error = (f"specialist '{plan['preset']}' failed its "
+                                 f"generation probe: {probe_error}")
+                        await _progress(run.ctx, error, ok=False)
+                        return ToolResult(
+                            status="error", tool_name=self.name,
+                            result={"status": "error", "preset": plan["preset"],
+                                    "probe_error": probe_error,
+                                    "swap_back": run.swap_back_note},
+                            error=error)
                     model, run.routed = plan["alias"], True
                     run.swap_note = (f"'{plan['preset']}' was swapped onto its "
                                      f"slot for this {run.wanted} task (the slot's "
                                      "previous model was stopped)")
-                    await _progress(run.ctx, f"'{plan['preset']}' loaded — "
-                                             f"running the {run.wanted} task",
-                                    ok=True)
+                    await _progress(run.ctx, f"'{plan['preset']}' loaded and answered "
+                                             f"the generation probe — running the "
+                                             f"{run.wanted} task", ok=True)
                 else:
                     run.swap_note = (f"could not swap in '{plan['preset']}' "
                                      f"({res.error or (res.result or {}).get('status')})"
@@ -666,6 +733,7 @@ class SpecialistDelegate(Tool):
             if run.routed and not run.swap_note:
                 await _progress(run.ctx, f"route: {run.wanted} → {model}")
         run.model = model
+        return None
 
     def _resolve_tools_budget_verify(self, run: _DelegateRun) -> ToolResult | None:
         """Phase — resolve the child's toolset (rejecting a set that can
@@ -828,11 +896,15 @@ class SpecialistDelegate(Tool):
         # failures surface in the result, never silently.
         try:
             from runtime.tool_base import role_sampling
-            # sampling only when a role temperature applies — older custom
-            # spawn wrappers must keep working without the kwarg.
-            # §4b: the specialist's own preset profile.role_temperature wins
-            # for the tags it pins (model-aware, global table as fallback).
-            _rs = role_sampling(run.ctx.config, run.wanted, model=run.model)
+            # Optional spawn sampling is omitted when empty so older custom
+            # wrappers keep working. §4b: the specialist's own preset
+            # profile.role_temperature wins for tags it pins (global as fallback).
+            _rs = dict(role_sampling(run.ctx.config, run.wanted, model=run.model)
+                       or {})
+            if run.evicted:
+                # A swapped-out brain/specialist cannot be this child's fallback.
+                # Keep the original target's error instead of retrying a dead port.
+                _rs["disable_fallbacks"] = True
             run.child = await run.ctx.spawn(
                 run.task, tools=run.tools, model=run.model,
                 name=_child_label(run), budget=run.budget, verify=run.verify,
@@ -1006,6 +1078,10 @@ class SpecialistDelegate(Tool):
                         "not the coding model.")
                 result["note"] = f"{result['note']} {note}" if result.get("note") else note
         if child.get("error"):
+            # Keep the full child/proxy error in the result and journal it; a
+            # disabled fallback must never hide the original specialist failure.
+            log.warning("specialist child on %s failed: %s", run.model,
+                        str(child["error"])[:2000])
             result["error"] = child["error"]
         ok = child.get("status") == "ok"
         _err = None if ok else (child.get("error") or child.get("status"))

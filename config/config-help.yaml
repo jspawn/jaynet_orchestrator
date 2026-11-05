@@ -275,6 +275,7 @@ exact:
   tools.code.delegate.strength: "Preset strength tag specialist.delegate routes by when no alias is pinned (default: coding; allround counts)."
   tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 32 — the fleet-wide 16 is for quick fan-out, and 24 died one short on tb-huarong-dao-solver)."
   tools.code.delegate.swap_wait_s: "Seconds to poll for a swapped-in model to come live before falling back to the allround route (model loads take tens of seconds)."
+  tools.code.delegate.generation_probe_wait_s: "Seconds to require one tiny generation directly from a swapped backend before spawning. Failure preserves the original error and restores evicted models without spawning."
   tools.code.delegate.verify: "Ground-truth check command pinned on EVERY delegate child (e.g. 'pytest -q') — the child can't finish until it exits 0 in the sandbox; tests are hash-guarded against tampering."
   tools.code.delegate.auto_verify: "When no verify is given, attach the workspace's standard test command automatically when detectable (pytest / npm test / make test / go test / cargo test)."
   tools.code.delegate.verify_timeout_s: "Per-check timeout (s) for AUTO-ATTACHED verify checks — full suites outlive the verifier's 180s default; also covers the baseline pre-run."

@@ -1315,6 +1315,9 @@ tools:
       swap_wait_s: 120        # seconds to wait for a swapped-in model to finish
                                 # loading before giving up to the allround route
                                 # (llama-server loads a large model in tens of s)
+      generation_probe_wait_s: 60  # after the slot answers, require one tiny direct
+                                # generation before spawning; fail closed with the
+                                # original backend error, never an evicted-brain fallback
       verify: null            # optional pinned ground-truth check for EVERY
                                 # delegate child (command string like "pytest -q",
                                 # run sandboxed in the child workspace; tests are

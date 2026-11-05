@@ -6,9 +6,19 @@ evidence: the brain once passed tools=["lint.run"] and then wrote the code
 inline itself)."""
 import asyncio
 
+import pytest
+
 import tools.model.catalog as catalog
 from runtime.tool_base import ToolResult
 from tools.specialist.delegate import SpecialistDelegate
+
+
+@pytest.fixture(autouse=True)
+def _generation_probe_ok(monkeypatch):
+    """Offline default: successful swaps pass their backend generation probe."""
+    async def ok(preset, served_model, wait_s):
+        return None
+    monkeypatch.setattr("tools.specialist.delegate._generation_probe", ok)
 
 CFG = {
     "models": {"presets": {
@@ -76,8 +86,9 @@ class _Ctx:
         self.spawn_calls = []
 
     async def spawn(self, task, tools=None, model=None, name=None,
-                    budget=None, verify=None, work_root_path=None):
-        self.spawn_calls.append({"tools": tools, "model": model})
+                    budget=None, verify=None, work_root_path=None, sampling=None):
+        self.spawn_calls.append({"tools": tools, "model": model,
+                                 "sampling": sampling})
         return {"status": "ok", "answer": "done", "run_id": "child-1",
                 "budget": {}}
 
@@ -129,6 +140,7 @@ def test_delegate_auto_swaps_stopped_strength_holder(monkeypatch):
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     assert used == [{"preset": "dolphin", "swap": True, "include_brain": True}]
+    assert ctx.spawn_calls[0]["sampling"] == {"disable_fallbacks": True}
     assert ctx.spawn_calls[0]["model"] == "local-dolphin"
     assert r.result["model"] == "local-dolphin"
     assert "security" in r.result["routed"]
@@ -302,3 +314,43 @@ def test_delegate_mutation_tool_still_accepted(monkeypatch):
         {"task": "fix it", "tools": ["fs.read", "fs.write"]}, ctx))
     assert r.status == "ok", r.error
     assert ctx.spawn_calls[0]["tools"] == ["fs.read", "fs.write"]
+
+
+def test_generation_probe_failure_preserves_error_and_restores(monkeypatch):
+    """A listening but non-generating backend fails closed with its OWN error;
+    no child and no fallback-to-evicted-brain attempt is allowed."""
+    state = {"slot": SPECIALIST_LIVE}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return state["slot"] if slot == "specialist" else None
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            state["slot"] = {"alias": "local-dolphin",
+                             "strengths": ["security"], "serving": "dolphin"}
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"evicted": [{"slot": "brain",
+                                                   "preset": "occamy-q8"}]})
+
+    restored = []
+
+    async def fake_restore(ctx, records):
+        restored.append(records)
+        return ["restored occamy-q8"]
+
+    async def probe_fails(preset, served_model, wait_s):
+        return "HTTP 500: original backend failure"
+
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    monkeypatch.setattr("tools.specialist.delegate._generation_probe", probe_fails)
+    ctx = _Ctx(CFG)
+    r = asyncio.run(SpecialistDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert r.status == "error"
+    assert "original backend failure" in r.error
+    assert r.result["probe_error"] == "HTTP 500: original backend failure"
+    assert r.result["swap_back"] == "restored occamy-q8"
+    assert restored == [[{"slot": "brain", "preset": "occamy-q8"}]]
+    assert ctx.spawn_calls == []

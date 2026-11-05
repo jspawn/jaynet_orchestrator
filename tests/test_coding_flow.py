@@ -442,6 +442,9 @@ def test_delegate_progress_stages_emit(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog, "route_strength_exact", fake_exact)
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
     monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    async def probe_ok(preset, served_model, wait_s):
+        return None
+    monkeypatch.setattr("tools.specialist.delegate._generation_probe", probe_ok)
     ctx = _ctx()
     res = asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
     assert res.status == "ok"

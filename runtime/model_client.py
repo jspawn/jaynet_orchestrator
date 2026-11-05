@@ -79,6 +79,9 @@ _G4_MARKERS_RE = re.compile(r"<\|channel>[^<]*<channel\|>|<\|channel>|<channel\|
 
 _SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
                  "presence_penalty", "frequency_penalty", "seed", "max_tokens")
+# LiteLLM Router controls, not sampler params. Swap-driven delegates set
+# disable_fallbacks so an evicted brain cannot become the child's fallback.
+_ROUTER_CONTROL_KEYS = ("disable_fallbacks",)
 
 
 class _NullAsyncCtx:
@@ -112,11 +115,12 @@ def _is_context_window_error(status: int, body: str) -> bool:
 
 
 def _sampler_body(sampling: dict | None) -> dict:
-    """Whitelist sampler params for the /v1/chat/completions body, dropping
-    None/unset keys. An empty/None input yields {} — i.e. send no sampler params,
-    so the server falls back to the model's own (preset) defaults."""
+    """Whitelist sampler params and explicit LiteLLM Router controls, dropping
+    None/unset keys. An empty/None input yields {} — i.e. send no overrides,
+    so the server and proxy use their own defaults."""
     s = sampling or {}
-    return {k: s[k] for k in _SAMPLER_KEYS if s.get(k) is not None}
+    return {k: s[k] for k in _SAMPLER_KEYS + _ROUTER_CONTROL_KEYS
+            if s.get(k) is not None}
 
 
 def _is_local_model(model: str | None,

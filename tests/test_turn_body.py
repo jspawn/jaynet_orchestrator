@@ -45,6 +45,14 @@ def test_sampler_params_merge():
     assert b["temperature"] == 0.5
 
 
+def test_disable_fallbacks_is_an_explicit_router_control():
+    b = _turn_body("local-specialist", MSGS, TOOLS,
+                   {"disable_fallbacks": True}, True, False)
+    assert b["disable_fallbacks"] is True
+    b = _turn_body("local-specialist", MSGS, TOOLS, None, True, False)
+    assert "disable_fallbacks" not in b
+
+
 def test_extra_local_aliases_count_as_local():
     # serve.start'd models under a custom (non local-*) alias get the thinking
     # switch via the extra_local set (the local_concurrency keys by convention).

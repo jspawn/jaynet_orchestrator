@@ -53,7 +53,8 @@ Fixtures (`tests/conftest.py`):
 | `test_ledger.py` | the acceptance ledger: check declaration syntax, checks at done-transition, the `verify` action, harness-set `verified`, proof invalidation after later writes, open_must gate semantics, ledger.json round-trip + criterion-gated hydration, opt-in commit-on-verify with red→green baseline |
 | `test_model_profiles.py` | per-model harness profiles (§4b): profile validation + store migration + alias resolution, think-strip families, reasoning-budget override, parse_run_settings compaction/anchor/sampling layering, model-aware role_sampling |
 | `test_brain_overlays.py` | versioned per-brain overlays (§4c): append-only snapshots, idempotent accept, stale-base refusal, rollback, active-slot isolation, config precedence, brain-scoped dedup and eval provenance |
-| `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
+| `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in; explicit `disable_fallbacks` router control |
+| `test_strength_route.py` | strength routing and swap lifecycle: generation readiness, original-error preservation, no evicted-brain fallback, restore-on-failure |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, specialist.delegate; per-run sampler merge |
 | `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff); EGM independent reviews and readiness fail-closed |
 | `test_plan_gate.py` | deterministic auto/plan/direct routing, risky-work override, harness-side architect completion/failure, no parent-model fallback |

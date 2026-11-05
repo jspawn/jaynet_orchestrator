@@ -237,6 +237,12 @@ loads whichever the current task needs in place of the previous one.
   with its live log — stop frees the slot, start/restart tear the swap
   down and boot the slot's assigned preset again (as does the next
   service restart).
+  After the slot answers, the delegate requires one tiny generation directly
+  from the new backend (`tools.code.delegate.generation_probe_wait_s`, default
+  60s). Only then does the child start. Its requests carry
+  `disable_fallbacks: true`: an evicted brain must never become that child's
+  fallback. A failed probe or child keeps the original backend/proxy error in
+  the result and log, and the evicted models are restored as usual.
 - **Two brains at once:** register two brain servers under the same
   `local-orchestrator` alias in `config/litellm.yaml` with
   `routing_strategy: simple-shuffle` — the proxy round-robins, and with
