@@ -597,10 +597,10 @@ function renderBinRows(){
       <input data-bf="name" value="${esc(b.name)}" placeholder="rocm" style="width:90px">
       <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
       <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES (empty = CPU, no pinning)" style="width:200px">
-      <select data-bf="type" title="launch backend — llama argv via start-model.sh; vllm/radiance via runtime/launch_argv.py (shared conf keys translate)">
-        ${["llama","vllm","radiance"].map(t=>`<option value="${t}" ${t===(b.type||"llama")?"selected":""}>${t}</option>`).join("")}
+      <select data-bf="type" title="launch backend — llama argv via start-model.sh; vllm/radiance/saber via runtime/launch_argv.py (shared conf keys translate)">
+        ${["llama","vllm","radiance","saber"].map(t=>`<option value="${t}" ${t===(b.type||"llama")?"selected":""}>${t}</option>`).join("")}
       </select>
-      ${b.device_env?"":'<span class="muted" title="no GPU pinning — fine for CPU-only builds">cpu/none</span>'}
+      ${b.device_env?"":b.type==="saber"?'<span class="muted" title="Saber receives DEVICE/HIP_DEVICES from the preset">engine-managed</span>':'<span class="muted" title="no GPU pinning — fine for CPU-only builds">cpu/none</span>'}
       ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
       <button data-bhelp="${esc(b.name)}" title="show this binary's --help output" ${b.name?"":"disabled"}>help</button>
       <button class="danger" data-bdel="${i}">remove</button></div>`);
@@ -893,6 +893,7 @@ const CONF_KEYS=[
   {key:"MMPROJ",label:"mmproj (vision)",type:"file-gguf",def:"",help:"vision projector GGUF — empty = text-only"},
   {key:"MMPROJ_OFFLOAD",label:"mmproj offload",type:"enum",options:["off","on"],def:"off",help:"off = keep the projector on CPU"},
   {key:"MTP",label:"mtp (speculative)",type:"enum",options:["off","on"],def:"off",help:"self-speculative decoding (draft-mtp)"},
+  {key:"MTP_MODEL",label:"draft model / pack",type:"text",def:"",saber:true,help:"llama: separate MTP GGUF; Saber: DFlash2 pack directory"},
   {key:"SPEC_DRAFT_N_MAX",label:"spec draft n max",type:"number",def:"2",help:"max draft tokens per step (when MTP on)"},
   {key:"TOOLS_TEMPLATE",label:"tools template",type:"file-jinja",def:"",vllm:true,help:"custom chat-template file — empty = model's own"},
   {key:"THREADS",label:"threads",type:"text",def:"",help:"CPU threads; empty or -1 = llama default"},
@@ -906,9 +907,9 @@ const CONF_KEYS=[
   {key:"REASONING_EFFORT",label:"reasoning effort",type:"enum",options:["","minimal","low","medium","high","xhigh"],def:"",help:"template think-mode level (needs a template with supports_reasoning_effort); use when reasoning budget is a no-op — e.g. K2-Horizon's <ifm|think> tags"},
 ];
 // Per-backend extra keys (launch backend = the preset binary's registry
-// type). CONF_KEYS entries marked shared map to every backend; vllm:true
-// maps to vllm too; everything else is llama-only and stays inert in the
-// conf until the binary type switches back — the launcher warns per key.
+// type). CONF_KEYS entries marked shared map to every backend; vllm/saber
+// flags opt into their named backend too. Everything else stays inert until
+// the binary type switches back — the launcher warns per key.
 const BACKEND_KEYS={
   vllm:[
     {key:"KV_CACHE_DTYPE",label:"kv cache dtype",type:"enum",options:["","auto","fp8","fp8_e4m3","fp8_e5m2"],def:"",std:true,help:"KV cache quantization (llama CACHE_TYPE_K/V equivalent)"},
@@ -919,9 +920,12 @@ const BACKEND_KEYS={
     {key:"KV_CACHE_DTYPE",label:"kv cache dtype",type:"enum",options:["","fp8","bf16","f16"],def:"",std:true,help:"KV cache dtype (llama CACHE_TYPE_K/V equivalent)"},
     {key:"MAX_NUM_SEQS",label:"max num seqs",type:"number",def:"",std:true,help:"max concurrent sequences (≤32; hybrid models ≤8)"},
   ],
+  saber:[
+    {key:"MAX_NUM_SEQS",label:"max num seqs",type:"number",def:"",std:true,help:"max concurrent sequences (TP=1 default 4; TP=2 default 8)"},
+  ],
 };
 let _peAdvanced=false, _peFullForm=false, _peExtra=[], _peKnownShadow={};
-function peAllKeys(){ return CONF_KEYS.concat(BACKEND_KEYS.vllm, BACKEND_KEYS.radiance); }
+function peAllKeys(){ return CONF_KEYS.concat(BACKEND_KEYS.vllm, BACKEND_KEYS.radiance, BACKEND_KEYS.saber); }
 function peBackendType(){
   const b=(_presets.binaries||[]).find(x=>x.name===$("#peBin").value);
   return (b && b.type) || "llama";
@@ -957,7 +961,7 @@ function peVisibleKeys(){
     // Translation view: shared keys (model/ctx/template/extra args) keep
     // their values; the backend's own keys join; llama-only keys stay in
     // the conf, inert, until the binary type switches back.
-    const shared=CONF_KEYS.filter(k=>k.shared || (bt==="vllm" && k.vllm));
+    const shared=CONF_KEYS.filter(k=>k.shared || (bt==="vllm" && k.vllm) || (bt==="saber" && k.saber));
     return shared.concat(BACKEND_KEYS[bt]||[]).filter(k=>_peFullForm || k.std);
   }
   const multi=peGpuValue().includes(",");

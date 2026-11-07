@@ -1,19 +1,18 @@
-"""launch_argv — translate a preset .conf into vllm/radiance argv + env.
+"""launch_argv — translate a preset .conf into non-llama argv + env.
 
 The preset conf stays the canonical store (one KEY=VALUE set for every
 backend); this module is the per-backend renderer the launcher hands off to
-when the preset's binary has registry type vllm/radiance (llama argv stays in
-scripts/start-model.sh). Switching a preset's binary to another backend type
-is therefore the translation: shared keys (model, ctx, GPU cards, KV cache,
-chat template, extra args) land in each backend's own flags, honored-nowhere
-keys stay in the conf, inert, and every dropped key is named in a warning so
-the admin sees exactly what the switch suspends.
+when the preset's binary has registry type vllm/radiance/saber (llama argv
+stays in scripts/start-model.sh). Switching a preset's binary to another
+backend type is therefore the translation: shared keys land in each backend's
+own flags, honored-nowhere keys stay in the conf, inert, and every dropped key
+is named in a warning so the admin sees exactly what the switch suspends.
 
 Stdlib-only: start-model.sh runs this with the system python3.
 
 CLI (name mode via start-model.sh; --dry-run prints instead of exec):
 
-    launch_argv.py --conf FILE --type {vllm,radiance} --binary PATH
+    launch_argv.py --conf FILE --type {vllm,radiance,saber} --binary PATH
                    --device-env VAR --host H --port P --gpu LIST
                    --alias NAME [--dry-run]
 """
@@ -60,16 +59,55 @@ def parse_conf(path: str) -> dict[str, str]:
     return out
 
 
+def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
+               port: str, alias: str) -> dict[str, str]:
+    """Validate the two pre-sharded 27B packs and render upstream's env."""
+    if len(cards) not in (1, 2):
+        raise ValueError("saber 27B needs one GPU (TP=1) or two GPUs (TP=2)")
+    model = (conf.get("MODEL_PATH") or "").strip()
+    draft = (conf.get("MTP_MODEL") or "").strip()
+    if not model or not draft:
+        raise ValueError("saber needs MODEL_PATH (target pack directory) and "
+                         "MTP_MODEL (DFlash2 pack directory)")
+    if not os.path.isdir(model) or not os.path.isdir(draft):
+        raise ValueError(f"saber pack directory not found: {model} or {draft}")
+    if os.path.dirname(os.path.abspath(model)) != os.path.dirname(os.path.abspath(draft)):
+        raise ValueError("saber target and DFlash2 packs must share one parent directory")
+    tp1 = len(cards) == 1
+    for pack in (model, draft):
+        if ("-tp1-" in os.path.basename(pack)) != tp1:
+            raise ValueError("saber TP=1 needs -tp1- packs; TP=2 needs the two-rank packs")
+        ranks = ("rank0.pack",) if tp1 else ("rank0.pack", "rank1.pack")
+        for rank in ranks:
+            if not os.path.isfile(os.path.join(pack, rank)):
+                raise ValueError(f"saber pack file not found: {pack}/{rank}")
+    env = {
+        "PORT": str(port), "HOST": host,
+        "SABER_PACKS": os.path.dirname(os.path.abspath(model)),
+        "TIER": os.path.basename(model), "DRAFT": os.path.basename(draft),
+        "MODEL": alias or "Qwen3.8", "CNAME": f"saber-jaynet-{port}",
+    }
+    if conf.get("CTX_SIZE"):
+        env["MAX_CTX"] = conf["CTX_SIZE"]
+    if conf.get("MAX_NUM_SEQS"):
+        env["MAX_SEQS"] = conf["MAX_NUM_SEQS"]
+    if tp1:
+        env["DEVICE"] = cards[0]
+    else:
+        env["HIP_DEVICES"] = ",".join(cards)
+    return env
+
+
 def build_argv(backend: str, conf: dict[str, str], *, binary: str,
                device_env: str, host: str, port: str, gpu: str,
                alias: str) -> tuple[list[str], dict[str, str], list[str]]:
-    """(argv, env, warnings) for backend ∈ {vllm, radiance}.
+    """(argv, env, warnings) for backend ∈ {vllm, radiance, saber}.
 
-    gpu is the catalog placement: "" = CPU (refused — both are GPU engines),
-    "0" = pin one card, "0,1" = spread over N cards (--tensor-parallel-size /
-    --tp N). env carries the device pinning; warnings name every dropped key.
+    gpu is the catalog placement: "" = CPU (refused — all are GPU engines),
+    "0" = pin one card, "0,1" = spread over two cards. env carries the
+    backend's device pinning; warnings name every dropped key.
     """
-    if backend not in ("vllm", "radiance"):
+    if backend not in ("vllm", "radiance", "saber"):
         raise ValueError(f"unknown backend {backend!r}")
     gpu = (gpu or "").strip()
     if not gpu:
@@ -78,20 +116,20 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
     model = (conf.get("MODEL_PATH") or "").strip()
     if not model:
         raise ValueError("MODEL_PATH may not be empty")
-    if not os.path.isfile(model) and not _REPO_RE.match(model):
+    if backend != "saber" and not os.path.isfile(model) and not _REPO_RE.match(model):
         raise ValueError(f"model not found: {model} (not a file, not an "
                          "owner/name HF repo id)")
 
     warns: list[str] = []
     for key in _KNOWN_LLAMA_ONLY:
-        if conf.get(key):
+        if conf.get(key) and not (backend == "saber" and key == "MTP_MODEL"):
             warns.append(f"{key} dropped: llama-only, no {backend} equivalent")
     extra = shlex.split(conf.get("EXTRA_ARGS") or "")
     cards = [c for c in gpu.split(",") if c.strip()]
 
     argv = [binary]
     env: dict[str, str] = {}
-    if device_env:
+    if device_env and backend != "saber":
         env[device_env] = gpu
 
     if backend == "vllm":
@@ -109,7 +147,7 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
             argv += ["--chat-template", conf["TOOLS_TEMPLATE"]]
         if alias:
             argv += ["--served-model-name", alias]
-    else:  # radiance
+    elif backend == "radiance":
         argv += ["--model", model, "--host", host, "--port", str(port),
                  "--tp", str(len(cards))]
         if conf.get("CTX_SIZE"):
@@ -127,13 +165,18 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
         if alias:
             warns.append(f"ALIAS {alias!r} not settable: radiance reports "
                          "its own model id (match served_id to it)")
+    else:
+        env = _saber_env(conf, cards, host=host, port=port, alias=alias)
+        for key in ("KV_CACHE_DTYPE", "GPU_MEM_UTIL", "TOOLS_TEMPLATE"):
+            if conf.get(key):
+                warns.append(f"{key} dropped: no saber 27B equivalent")
     return argv + extra, env, warns
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--conf", required=True)
-    ap.add_argument("--type", required=True, choices=("vllm", "radiance"),
+    ap.add_argument("--type", required=True, choices=("vllm", "radiance", "saber"),
                     dest="backend")
     ap.add_argument("--binary", required=True)
     ap.add_argument("--device-env", default="")

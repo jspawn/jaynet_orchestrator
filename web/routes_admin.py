@@ -569,7 +569,7 @@ def register(app, s):
                 raise HTTPException(400, "binary name may not be empty")
             bins[name] = {"path": str(r.get("path") or "").strip(),
                           "device_env": str(r.get("device_env") or "").strip(),
-                          # launch backend (llama|vllm|radiance); validated
+                          # launch backend (llama|vllm|radiance|saber); validated
                           # by set_binaries, llama when omitted
                           "type": str(r.get("type") or "").strip()}
         try:

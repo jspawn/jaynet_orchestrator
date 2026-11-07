@@ -200,13 +200,13 @@ reported as "authentication required" by `model.use`/`model.list`; a wrong
 key shows as "API key rejected".
 
 <a name="backend-typed-presets"></a>
-## Backend-typed presets (llama / vLLM / radiance)
+## Backend-typed presets (llama / vLLM / radiance / Saber)
 
 JayNet can also **launch** non-llama engines itself. Every binary in the
 registry (Admin → Models → Servers → Binaries) has a **type** — `llama`
-(default), `vllm` or `radiance` — and a preset's binary picks its launch
-backend: llama argv is assembled by `scripts/start-model.sh` as always;
-vllm/radiance hand off to `runtime/launch_argv.py`.
+(default), `vllm`, `radiance` or `saber` — and a preset's binary picks its
+launch backend: llama argv is assembled by `scripts/start-model.sh` as always;
+the other types hand off to `runtime/launch_argv.py`.
 
 The preset's `.conf` stays one canonical KEY=VALUE set for every backend, so
 **switching a preset's binary to another type IS the translation**: shared
@@ -214,23 +214,48 @@ keys keep their values both ways, keys the new engine doesn't understand
 stay in the conf, inert (the launcher warns about each at start), and the
 editor shows an inert-keys note until you switch back.
 
-| conf key | llama | vllm | radiance |
-|---|---|---|---|
-| `MODEL_PATH` | `--model` | `serve <model>` | `--model` |
-| `CTX_SIZE` | `--ctx-size` | `--max-model-len` | `--max-model-len` |
-| device `0,1` | env + `--split-mode` | env + `--tensor-parallel-size N` | env + `--tp N` |
-| `KV_CACHE_DTYPE` | — (uses `CACHE_TYPE_K/V`) | `--kv-cache-dtype` | `--kv-cache-dtype` |
-| `GPU_MEM_UTIL` | — | `--gpu-memory-utilization` | dropped |
-| `MAX_NUM_SEQS` | — | `--max-num-seqs` | `--max-num-seqs` |
-| `TOOLS_TEMPLATE` | `--chat-template-file` | `--chat-template` | dropped (container owns it) |
-| `EXTRA_ARGS` | appended | appended | appended |
-| llama-only keys (sampling, `GPU_LAYERS`, `MMAP`, `MTP`, …) | honored | dropped + warned | dropped + warned |
+| conf key | llama | vllm | radiance | Saber 27B |
+|---|---|---|---|---|
+| `MODEL_PATH` | `--model` | `serve <model>` | `--model` | target pack directory |
+| `MTP_MODEL` | separate draft GGUF | dropped | dropped | DFlash2 pack directory |
+| `CTX_SIZE` | `--ctx-size` | `--max-model-len` | `--max-model-len` | `MAX_CTX` |
+| device `0,1` | env + `--split-mode` | env + `--tensor-parallel-size N` | env + `--tp N` | `HIP_DEVICES` + TP=2 |
+| device `0` | one card | one card | one card | `DEVICE` + TP=1 |
+| `KV_CACHE_DTYPE` | — (uses `CACHE_TYPE_K/V`) | `--kv-cache-dtype` | `--kv-cache-dtype` | dropped |
+| `GPU_MEM_UTIL` | — | `--gpu-memory-utilization` | dropped | dropped |
+| `MAX_NUM_SEQS` | — | `--max-num-seqs` | `--max-num-seqs` | `MAX_SEQS` |
+| `TOOLS_TEMPLATE` | `--chat-template-file` | `--chat-template` | dropped | dropped (pack owns it) |
+| `EXTRA_ARGS` | appended | appended | appended | appended |
+| other llama-only keys | honored | dropped + warned | dropped + warned | dropped + warned |
 
-Both engines are GPU-only: a preset with an empty device refuses with a
-clear error (pick a llama binary for CPU serving). In `--preset` file mode a
-conf can pin its backend directly with `SERVER=vllm|radiance`. The editor's
-structured form switches its field set with the binary dropdown — that
-dropdown change is the translate button; nothing is rewritten or lost.
+All non-llama engines are GPU-only: a preset with an empty device refuses
+with a clear error. In `--preset` file mode a conf can pin its backend with
+`SERVER=vllm|radiance|saber`. The editor's structured form switches its field
+set with the binary dropdown; nothing is rewritten or lost.
+
+### Saber on R9700
+
+`scripts/build_tools.sh saber rocm` builds the pinned Saber image and release
+binary without downloading weights or starting a server. It requires podman
+or docker and `AMDGPU_TARGETS=gfx1201`. Then download exactly the layout the
+preset needs (TP packs are not interchangeable):
+
+```bash
+SABER_PACKS=$ORCH_MODELS/saber-packs \
+  ~/jaynet-build/saber-rocm/tools/fetch_packs.sh 27b-tp1  # one card, ~25 GB
+SABER_PACKS=$ORCH_MODELS/saber-packs \
+  ~/jaynet-build/saber-rocm/tools/fetch_packs.sh 27b      # two cards, ~26 GB
+```
+
+Register `$BIN_DIR/saber.rocm/bin/saber` as type `saber` with an empty device
+env. The reference presets `specialist-qwen3.8-27b-saber-tp1.conf` and
+`specialist-qwen3.8-27b-saber-tp2.conf` contain the matching pack paths,
+context and concurrency defaults. Saber starts a detached container;
+`scripts/saber-serve.sh` keeps the JayNet process attached, follows its logs,
+and stops that preset's container on shutdown. Managed presets currently
+cover 27B only; Flash-Next can use upstream's launcher plus a remote preset.
+Container-engine RAM is not attributed to JayNet's wrapper process tree yet;
+use whole-card VRAM and container stats when checking its footprint.
 
 ## External embed / rerank endpoints
 

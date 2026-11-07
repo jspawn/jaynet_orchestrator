@@ -1,4 +1,4 @@
-"""launch_argv: canonical conf -> vllm/radiance argv translation.
+"""launch_argv: canonical conf -> vllm/radiance/saber translation.
 
 The conf is the single store for every backend; build_argv renders the
 backend's own flags from it. Switching a preset's binary type is the
@@ -137,3 +137,52 @@ def test_cli_missing_model_errors(conf_file, capsys):
                "--gpu", "0", "--dry-run"])
     assert rc == 1
     assert "MODEL_PATH" in capsys.readouterr().err
+
+
+def _saber_conf(tmp_path, *, tp=1):
+    suffix = "-tp1-fp8head" if tp == 1 else "-fp8head"
+    model = tmp_path / "packs" / f"qwen38-27b-nvfp4-devfinal{suffix}"
+    draft = tmp_path / "packs" / f"qwen38-dflash2-drafter{suffix}"
+    ranks = ("rank0.pack",) if tp == 1 else ("rank0.pack", "rank1.pack")
+    for pack in (model, draft):
+        pack.mkdir(parents=True)
+        for rank in ranks:
+            (pack / rank).write_text("SBRPACK1")
+    return {"MODEL_PATH": str(model), "MTP_MODEL": str(draft),
+            "CTX_SIZE": "65536", "MAX_NUM_SEQS": "4",
+            "EXTRA_ARGS": "--enable-prefix-caching on --vision lazy"}
+
+
+def test_saber_tp1_maps_packs_devices_and_shared_keys(tmp_path):
+    argv, env, warns = build_argv(
+        "saber", _saber_conf(tmp_path), **_kwargs(gpu="1", alias="qwen-saber"))
+    assert argv == ["/bin/x", "--enable-prefix-caching", "on",
+                    "--vision", "lazy"]
+    assert env["DEVICE"] == "1" and "HIP_DEVICES" not in env
+    assert "HIP_VISIBLE_DEVICES" not in env
+    assert env["PORT"] == "8090" and env["HOST"] == "127.0.0.1"
+    assert env["MAX_CTX"] == "65536" and env["MAX_SEQS"] == "4"
+    assert env["MODEL"] == "qwen-saber"
+    assert env["CNAME"] == "saber-jaynet-8090"
+    assert env["TIER"].endswith("-tp1-fp8head")
+    assert env["DRAFT"].endswith("-tp1-fp8head")
+    assert env["SABER_PACKS"] == str(tmp_path / "packs")
+    assert warns == []
+
+
+def test_saber_tp2_uses_two_rank_packs_and_warns_about_llama_keys(tmp_path):
+    conf = _saber_conf(tmp_path, tp=2) | {"TEMP": "0.6", "MTP": "off"}
+    _, env, warns = build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    dropped = {w.split(" ")[0] for w in warns}
+    assert dropped == {"TEMP", "MTP"}
+
+
+def test_saber_rejects_wrong_tp_or_missing_draft(tmp_path):
+    with pytest.raises(ValueError, match="DFlash2"):
+        build_argv("saber", {"MODEL_PATH": str(tmp_path)}, **_kwargs())
+    conf = _saber_conf(tmp_path)
+    with pytest.raises(ValueError, match="TP=1"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    with pytest.raises(ValueError, match="one GPU"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1,2"))

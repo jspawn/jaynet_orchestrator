@@ -20,8 +20,9 @@ need_shares / plan_eviction) prefers measured per-card truth. Flow:
    proportional share — the MemAvailable delta undercounts because mmap'd
    pages read as reclaimable page cache; audit 2026-10-06 #14). The tree
    matters for vllm/radiance: their engine-core/worker children carry no
-   --port in the cmdline yet hold the bulk of the host RAM. The delta is
-   kept as ram_delta_gib for reference;
+   --port in the cmdline yet hold the bulk of the host RAM. Saber's wrapper
+   is found by its PORT env instead; its container engine's RAM is outside
+   that process tree. The delta is kept as ram_delta_gib for reference;
 6. write preset["measured"] into the preset store;
 7. restore exactly what was hibernated (restore_evicted), even on
    cancellation — the brain is the current run's model.
@@ -44,9 +45,9 @@ log = logging.getLogger(__name__)
 
 
 def _server_pids_by_port(port: int) -> list[int]:
-    """PIDs whose cmdline carries `--port <port>` — the measurement server's
-    own process (llama-server, vllm serve, radiance all take --port).
-    /proc scan, no lsof dependency."""
+    """PIDs for the measurement server, found by `--port <port>` in argv or
+    `PORT=<port>` in Saber's lifecycle wrapper environment. /proc scan, no
+    lsof dependency; only the port value is read from the environment."""
     out = []
     for d in Path("/proc").iterdir():
         if not d.name.isdigit():
@@ -57,6 +58,16 @@ def _server_pids_by_port(port: int) -> list[int]:
         except OSError:
             continue
         if "--port" in parts and str(port) in parts:
+            out.append(int(d.name))
+            continue
+        if not any(p.endswith(("/saber-lifecycle", "/saber-serve.sh"))
+                   for p in parts):
+            continue
+        try:
+            env = (d / "environ").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if f"PORT={port}".encode() in env:
             out.append(int(d.name))
     return out
 

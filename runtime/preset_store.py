@@ -598,8 +598,8 @@ class PresetStore:
         (and serve.start's health check) expect the DB port — live find
         2026-10-05: model.measure hibernated the box, cybertiel came up on
         :8080, the ready-wait polled :8090 for 600s. And without SERVER a
-        file-mode launch of a vllm/radiance preset builds LLAMA argv for the
-        vllm/radiance binary — it prints --help and exits (live find
+        file-mode launch of a non-llama preset builds LLAMA argv for the
+        vllm/radiance/saber binary — it prints --help and exits (live find
         2026-10-21: measuring qwen38-radiance).
         Appended LAST so they win over any hand-written slot keys in the conf
         (the dispatcher's KEY= parser is last-wins). ALIAS is deliberately NOT
@@ -909,10 +909,10 @@ class PresetStore:
 
     # ---- binary registry ----------------------------------------------------
     # Each build: {path, device_env, type}. `type` is the LAUNCH BACKEND —
-    # llama (default; argv assembled by start-model.sh), vllm or radiance
+    # llama (default; argv assembled by start-model.sh), vllm/radiance/saber
     # (argv by runtime/launch_argv.py). Legacy entries without a type are
     # llama builds, so existing registries seed unchanged.
-    BINARY_TYPES = ("llama", "vllm", "radiance")
+    BINARY_TYPES = ("llama", "vllm", "radiance", "saber")
     DEFAULT_BINARY_TYPE = "llama"
 
     def get_binaries(self) -> dict:

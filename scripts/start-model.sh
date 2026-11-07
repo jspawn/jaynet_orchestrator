@@ -123,7 +123,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             # Slot keys are captured, not applied — name mode ignores them
             # (runtime.yaml owns the slot); --preset mode applies them below.
             # SERVER picks the launch backend in FILE mode (llama default;
-            # vllm/radiance hand off to runtime/launch_argv.py). Name mode
+            # vllm/radiance/saber hand off to runtime/launch_argv.py). Name mode
             # takes the backend from the binary registry instead.
             PORT|HOST|ALIAS|VISIBLE_DEVICES|LLAMA_BIN|DEVICE_ENV|SERVER)
                 printf -v "_F_$key" "%s" "$val" ;;
@@ -172,15 +172,15 @@ if [[ -n "$_BIN_LIB" ]]; then
     export LD_LIBRARY_PATH="${_BIN_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
-# -- Backend hand-off (vllm/radiance) ------------------------------------------
+# -- Backend hand-off (vllm/radiance/saber) ------------------------------------
 # The binary registry type (name mode) or the conf's SERVER= key (file mode)
-# picks the launch backend. llama (default) continues below; vllm/radiance
+# picks the launch backend. llama (default) continues below; other backends'
 # argv is built by runtime/launch_argv.py from the same conf — shared keys
 # map, llama-only keys drop with a warning. exec: the python process replaces
-# this script, so signals reach the server directly (no bash watchdog needed).
+# this script, so signals reach the server/lifecycle wrapper directly.
 _LAUNCH_TYPE="${_BIN_TYPE:-llama}"
 [[ "$MODE" == "file" ]] && _LAUNCH_TYPE="${_F_SERVER:-llama}"
-if [[ "$_LAUNCH_TYPE" == "vllm" || "$_LAUNCH_TYPE" == "radiance" ]]; then
+if [[ "$_LAUNCH_TYPE" == "vllm" || "$_LAUNCH_TYPE" == "radiance" || "$_LAUNCH_TYPE" == "saber" ]]; then
     _PY="${_PY:-}"
     if [[ -z "$_PY" ]]; then
         _PY="$_ORCH_HOME/.venv/bin/python3"

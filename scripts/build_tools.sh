@@ -2,7 +2,7 @@
 # ============================================================================
 #  build_tools.sh -- Build llama.cpp, stable-diffusion.cpp, whisper.cpp,
 #                     piper TTS, omnivoice.cpp (OmniVoice TTS), vLLM (ROCm,
-#                     from source), the Strata HIP engine, and the
+#                     from source), Strata/radiance/Saber GPU engines, and the
 #                     llm-tools venv
 #  Backends:  vulkan (default; AMD/NVIDIA/Intel/mixed, no vendor SDK),
 #             rocm (AMD), cuda (NVIDIA), sycl (Intel oneAPI),
@@ -34,6 +34,9 @@
 #    ./build_tools.sh radiance rocm      # radiance C++/HIP server (RDNA4: gfx1200/1201;
 #                                         #  OpenAI/Anthropic/llama-server APIs, .rad
 #                                         #  containers; codeberg.org/StillDeadcode/radiance)
+#    ./build_tools.sh saber rocm         # Saber Rust/HIP engine for Qwen3.8-27B
+#                                         #  (R9700/gfx1201; container build only,
+#                                         #  no model packs or server start)
 #    ./build_tools.sh update             # rebuild everything already built
 #                                         # (every source tree/venv present —
 #                                         #  vanilla trees sync to latest, the
@@ -49,8 +52,8 @@
 #    -y/--yes: skip the delete confirmation prompt
 #
 #  Projects:  llama, sd, whisper, piper, tools, k2horizon, spark, bonsai,
-#             omnivoice, vllm, strata, radiance, all
-#             (k2horizon/spark/bonsai/omnivoice/vllm/strata/radiance are NOT
+#             omnivoice, vllm, strata, radiance, saber, all
+#             (k2horizon/spark/bonsai/omnivoice/vllm/strata/radiance/saber are NOT
 #             part of "all" -- experimental forks / opt-in tools)
 #  Special:   update -- rebuild every tree/venv already present (see above)
 #  Backends:  rocm, vulkan, cuda, sycl, cpu
@@ -202,6 +205,14 @@ STRATA_ROCM_DIR="${BASE_DIR}/strata-rocm"
 RADIANCE_REPO="https://codeberg.org/StillDeadcode/radiance.git"
 RADIANCE_COMMIT="cb5a69ac3f993560ed8dcb32fa524b3b9f987c62"
 RADIANCE_ROCM_DIR="${BASE_DIR}/radiance-rocm"
+# Saber (github.com/GGZ14/saber-engine): Rust/HIP Qwen3.8 engine for the
+# R9700/gfx1201. Upstream builds and serves inside podman/docker; our target
+# builds the image + release binary only. Weight packs are separate, large,
+# and TP-specific, so they are never downloaded implicitly. Pinned like the
+# other single-maintainer sources.
+SABER_REPO="https://github.com/GGZ14/saber-engine"
+SABER_COMMIT="c8a1e84b39e73363495e549d480a6f6c3893800c"
+SABER_ROCM_DIR="${BASE_DIR}/saber-rocm"
 # GPU/CPU tuning knobs. Empty here = asked later, but only when the matching
 # backend is actually in the build plan; env presets skip the prompts.
 #   AMDGPU_TARGETS: gfx target for ROCm builds (e.g. gfx1100, gfx1201)
@@ -253,7 +264,7 @@ STALE=0
 YES=0
 for arg in "$@"; do
     case "$arg" in
-        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm|strata|radiance) PROJECTS+=("$arg") ;;
+        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm|strata|radiance|saber) PROJECTS+=("$arg") ;;
         all) PROJECTS+=(llama sd whisper piper tools) ;;
         rocm|vulkan|cuda|sycl|cpu) BACKENDS+=("$arg") ;;
         update) UPDATE=1 ;;
@@ -406,6 +417,7 @@ existing_jobs() {
         "$VLLM_SRC_DIR:vllm-rocm" \
         "$STRATA_ROCM_DIR:strata-rocm" \
         "$RADIANCE_ROCM_DIR:radiance-rocm" \
+        "$SABER_ROCM_DIR:saber-rocm" \
     ; do
         [[ -d "${pair%%:*}/.git" ]] && echo "${pair##*:}"
     done
@@ -472,6 +484,7 @@ if [[ $DELETE -eq 1 ]]; then
             omnivoice) src="$BASE_DIR/omnivoice.cpp-$be";          family="omnivoice.cpp" ;;
             strata)    src="$BASE_DIR/strata-$be";                 family="strata" ;;
             radiance)  src="$BASE_DIR/radiance-$be";               family="radiance" ;;
+            saber)     src="$BASE_DIR/saber-$be";                  family="saber" ;;
             *) return 1 ;;
         esac
         echo "$src"
@@ -688,6 +701,15 @@ for p in "${PROJECTS[@]}"; do
             JOBS_LIST+=("radiance-rocm")
         else
             warn "radiance is ROCm-only -- skipping (no rocm backend selected)"
+        fi
+        continue
+    fi
+    # Saber ships HIP kernels for the R9700/gfx1201 only.
+    if [[ "$p" == "saber" ]]; then
+        if [[ " ${BACKENDS[*]} " == *" rocm "* ]]; then
+            JOBS_LIST+=("saber-rocm")
+        else
+            warn "saber is ROCm-only -- skipping (no rocm backend selected)"
         fi
         continue
     fi
@@ -2486,6 +2508,82 @@ build_radiance_rocm() {
     install_radiance_prefix "$RADIANCE_ROCM_DIR" rocm
 }
 
+# -- Saber containerized Rust/HIP build (ROCm, gfx1201) -----------------------
+install_saber_prefix() {
+    local src_dir="$1" tag dest link
+    tag="$(git -C "$src_dir" describe --tags --always 2>/dev/null || echo unknown)"
+    dest="$BIN_DIR/saber.rocm-${tag}"
+    link="$BIN_DIR/saber.rocm"
+    step "Install saber (rocm) -> ${dest}"
+    rm -rf "$dest"
+    mkdir -p "$dest/bin"
+    cp "$SCRIPT_DIR/saber-serve.sh" "$dest/bin/saber-lifecycle"
+    cat > "$dest/bin/saber" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export SABER_REPO="\${SABER_REPO:-${src_dir}}"
+exec "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/saber-lifecycle" "\$@"
+EOF
+    chmod +x "$dest/bin/saber" "$dest/bin/saber-lifecycle"
+    [[ -d "$link" && ! -L "$link" ]] && rm -rf "$link"
+    ln -sfn "$dest" "$link"
+    cat > "$dest/NOTES.md" <<EOF
+# Saber (Rust/HIP, R9700/gfx1201)
+
+Saber (https://github.com/GGZ14/saber-engine) serves Qwen3.8-27B and
+Qwen3.8-Flash-Next through an OpenAI-compatible API. Source: ${src_dir};
+release binary: .cache/target-container/release/saber. JayNet's managed 27B
+launcher is ${link}/bin/saber (registry type \`saber\`, device_env empty).
+
+No weights were downloaded. Fetch exactly one TP layout (resumable):
+  SABER_PACKS="\${ORCH_MODELS:-\$HOME/jaynet-models}/saber-packs" \\
+    ${src_dir}/tools/fetch_packs.sh 27b-tp1   # one card, about 25 GB
+  SABER_PACKS="\${ORCH_MODELS:-\$HOME/jaynet-models}/saber-packs" \\
+    ${src_dir}/tools/fetch_packs.sh 27b       # two cards, about 26 GB
+
+Reference presets: specialist-qwen3.8-27b-saber-tp1.conf and -tp2.conf.
+TP=1 and TP=2 packs are not interchangeable. Flash-Next needs upstream's
+own launcher or an adopted remote preset in this pass.
+EOF
+    ok "Installed saber rocm: $link/bin/saber (see ${dest}/NOTES.md)"
+}
+
+apply_saber_patches() {
+    local dir="$1" file="$1/tools/serve_27b.sh"
+    # Upstream hardcodes 0.0.0.0 and clap rejects a second --host. Let our
+    # launcher supply HOST instead; default remains loopback for manual runs.
+    if grep -qF -- '--host ${HOST:-127.0.0.1} --port $PORT' "$file"; then
+        ok "saber-loopback-host already applied"
+    elif grep -qF -- '--host 0.0.0.0 --port $PORT' "$file"; then
+        sed -i 's/--host 0\.0\.0\.0 --port \$PORT/--host ${HOST:-127.0.0.1} --port $PORT/' "$file"
+        ok "applied saber-loopback-host"
+    else
+        fail "saber-loopback-host applies neither way -- upstream changed tools/serve_27b.sh"
+    fi
+}
+
+build_saber_rocm() {
+    step "Pre-flight (saber ROCm container build)"
+    command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
+        || fail "saber needs podman or docker"
+    [[ "$AMDGPU_TARGETS" == "gfx1201" ]] \
+        || fail "saber supports AMDGPU_TARGETS=gfx1201 only"
+    pin_repo "$SABER_ROCM_DIR" "$SABER_REPO" "$SABER_COMMIT"
+    apply_saber_patches "$SABER_ROCM_DIR"
+    cd "$SABER_ROCM_DIR"
+    if [[ $CLEAN -eq 1 ]]; then
+        step "Clean saber release target (packs/tokenizer stay untouched)"
+        rm -rf .cache/target-container
+    fi
+    step "Build saber development image"
+    bash tools/build-image.sh
+    step "Build saber release binary in the development image"
+    bash tools/dev.sh cargo build --release -p saber-cli
+    [[ -x .cache/target-container/release/saber ]] \
+        || fail "saber build produced no .cache/target-container/release/saber"
+    install_saber_prefix "$SABER_ROCM_DIR"
+}
+
 # -- Sanity: toolchain ------------------------------------------------------
 preflight() {
     step "Pre-flight checks"
@@ -2584,6 +2682,19 @@ preflight() {
         else
             fail "cmake ${cmake_ver:-unknown} too old -- radiance needs >= 3.21 ($(pkg_hint cmake cmake))"
         fi
+    fi
+
+    # Saber: the toolchain is containerized, but the AMD driver nodes and a
+    # container runtime are host requirements. Its shipped kernels are gfx1201.
+    if [[ " ${JOBS_LIST[*]} " == *" saber-rocm "* ]]; then
+        command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
+            || fail "saber needs podman or docker"
+        [[ -c /dev/kfd && -d /dev/dri ]] \
+            || fail "saber needs the AMD kernel driver (/dev/kfd and /dev/dri)"
+        command -v curl >/dev/null 2>&1 || fail "curl not found (required for saber)"
+        [[ "$AMDGPU_TARGETS" == "gfx1201" ]] \
+            || fail "saber supports AMDGPU_TARGETS=gfx1201 only (R9700), not '$AMDGPU_TARGETS'"
+        ok "saber container runtime + gfx1201 target present"
     fi
 
     # pnpm/npm required for SD web UI -- warn once if any SD backend is built
@@ -2735,6 +2846,7 @@ main() {
             vllm-rocm)        build_vllm_rocm ;;
             strata-rocm)      build_strata_rocm ;;
             radiance-rocm)    build_radiance_rocm ;;
+            saber-rocm)       build_saber_rocm ;;
             sd-cpu)         build_sd_cpu ;;
             whisper-cpu)    build_whisper_cpu ;;
             piper)          build_piper ;;
@@ -2775,6 +2887,7 @@ main() {
             vllm-rocm)        echo -e "  vllm    ROCm:   ${BIN_DIR}/vllm (wrapper; venv ${VLLM_VENV}; see ${BIN_DIR}/vllm-rocm/ENVIRONMENT.md)" ;;
             strata-rocm)      echo -e "  strata  ROCm:   ${BIN_DIR}/strata.rocm/bin/strata (see ${BIN_DIR}/strata.rocm/NOTES.md)" ;;
             radiance-rocm)    echo -e "  radiance ROCm:  ${BIN_DIR}/radiance.rocm/bin/radiance (see ${BIN_DIR}/radiance.rocm/NOTES.md)" ;;
+            saber-rocm)       echo -e "  saber   ROCm:   ${BIN_DIR}/saber.rocm/bin/saber (see ${BIN_DIR}/saber.rocm/NOTES.md)" ;;
             sd-cpu)         echo -e "  sd      CPU:    ${SD_CPU_DIR}/build/bin/{sd-cli,sd-server}" ;;
             whisper-cpu)    echo -e "  whisper CPU:    ${BIN_DIR}/whisper.cpp.cpu/bin/whisper-server" ;;
             piper)          echo -e "  piper   TTS:    ${PIPER_VENV}/bin/piper (voice: ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx)" ;;

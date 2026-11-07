@@ -222,3 +222,27 @@ models:
     assert r.returncode == 0, r.stderr
     assert not pwned.exists()                       # payload stayed inert
     assert "touch" in r.stdout                      # …but shows up as the alias text
+
+
+def test_file_mode_saber_hands_off_to_typed_launcher(tmp_path):
+    target = tmp_path / "packs" / "target-tp1-fp8head"
+    draft = tmp_path / "packs" / "draft-tp1-fp8head"
+    for pack in (target, draft):
+        pack.mkdir(parents=True)
+        (pack / "rank0.pack").write_text("SBRPACK1")
+    conf = _write(tmp_path / "saber.conf", f"""\
+SERVER=saber
+MODEL_PATH={target}
+MTP_MODEL={draft}
+CTX_SIZE=65536
+MAX_NUM_SEQS=4
+VISIBLE_DEVICES=1
+ALIAS=qwen-saber
+EXTRA_ARGS=--enable-prefix-caching on
+""")
+    _, r = _run(["--preset", conf, "--dry-run"], {}, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "backend: saber" in r.stdout
+    assert "DEVICE=1" in r.stdout and "HIP_VISIBLE_DEVICES" not in r.stdout
+    assert "MAX_CTX=65536" in r.stdout and "MAX_SEQS=4" in r.stdout
+    assert r.stdout.splitlines()[-1] == "/bin/true --enable-prefix-caching on"

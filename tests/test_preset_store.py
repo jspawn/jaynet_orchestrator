@@ -314,7 +314,7 @@ def test_binaries_seed_set_and_layering(tmp_path, monkeypatch):
 
 def test_binaries_type_field(tmp_path, monkeypatch):
     """Launch backend per binary: llama default (legacy entries untouched),
-    vllm/radiance validated, binary_type() drives the launcher hand-off."""
+    vllm/radiance/saber validated, binary_type() drives the hand-off."""
     seed = _seed(tmp_path)
     monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     cfg = {"models": seed}
@@ -325,17 +325,20 @@ def test_binaries_type_field(tmp_path, monkeypatch):
         "rocm": {"path": "/x/rocm/llama-server"},                      # no type → llama
         "rad": {"path": "/x/radiance", "type": "radiance",
                 "device_env": "HIP_VISIBLE_DEVICES"},
-        "vllm": {"path": "/x/vllm", "type": "vllm", "device_env": ""}})
+        "vllm": {"path": "/x/vllm", "type": "vllm", "device_env": ""},
+        "saber": {"path": "/x/saber", "type": "saber", "device_env": ""}})
     bins = s.get_binaries()
     assert bins["rocm"]["type"] == "llama"
     assert bins["rad"]["type"] == "radiance"
     assert bins["vllm"]["type"] == "vllm"
+    assert bins["saber"]["type"] == "saber"
     # invalid type rejected
     with pytest.raises(ValueError, match="invalid type"):
         s.set_binaries({"x": {"path": "/x", "type": "docker"}})
     # binary_type(): registry wins, llama for unset/legacy/dangling
     assert s.binary_type({"binary": "rad"}) == "radiance"
     assert s.binary_type({"binary": "vllm"}) == "vllm"
+    assert s.binary_type({"binary": "saber"}) == "saber"
     assert s.binary_type({"binary": "rocm"}) == "llama"
     assert s.binary_type({"binary": ""}) == "llama"
     assert s.binary_type({"binary": "ghost"}) == "llama"
@@ -368,7 +371,7 @@ def test_cli_resolve_emits_bin_type(tmp_path, monkeypatch, capsys):
 def test_materialized_conf_carries_server_key(tmp_path, monkeypatch):
     """File-mode launches (serve.start, model.measure) take the launch
     backend from the conf's SERVER= key — the store appends it for
-    non-llama binaries, or a vllm/radiance preset gets llama argv and the
+    non-llama binaries, or a typed preset gets llama argv and the
     binary exits on its own --help (live find 2026-10-21: measuring
     qwen38-radiance)."""
     seed = _seed(tmp_path)
@@ -377,10 +380,14 @@ def test_materialized_conf_carries_server_key(tmp_path, monkeypatch):
     assert ps.load_into_config(cfg) is True
     s = ps.PresetStore(str(tmp_path / "p.db"))
     s.set_binaries({"rocm": {"path": "/x/rocm/llama-server"},
-                    "rad": {"path": "/x/radiance", "type": "radiance"}})
+                    "rad": {"path": "/x/radiance", "type": "radiance"},
+                    "saber": {"path": "/x/saber", "type": "saber"}})
     s.upsert("brain", {"binary": "rad"})
     conf = open(s.get("brain")["preset"]).read()
     assert "SERVER=radiance" in conf
+    s.upsert("brain", {"binary": "saber"})
+    conf = open(s.get("brain")["preset"]).read()
+    assert "SERVER=saber" in conf
     # llama-typed binaries add nothing (llama is the file-mode default)
     s.upsert("brain", {"binary": "rocm"})
     conf = open(s.get("brain")["preset"]).read()
