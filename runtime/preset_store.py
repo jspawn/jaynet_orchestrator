@@ -347,6 +347,32 @@ def preset_name_for_alias(config: dict, alias: str | None) -> str:
     return matches[0] if len(matches) == 1 else ""
 
 
+def allowed_presets(config: dict) -> frozenset[str] | None:
+    """Run-local model allowlist; None/empty means no restriction."""
+    raw = ((config or {}).get("models") or {}).get("allowed_presets")
+    if not raw:
+        return None
+    return frozenset(str(name) for name in raw)
+
+
+def preset_allowed(config: dict, name: str) -> bool:
+    allowed = allowed_presets(config)
+    return allowed is None or name in allowed
+
+
+def alias_allowed(config: dict, alias: str | None) -> bool:
+    """Whether an explicit model alias is legal under the run allowlist.
+
+    None means the run's default brain and stays legal. With a restriction
+    active, aliases that do not resolve to an allowed preset (including cloud
+    aliases) are denied rather than becoming a routing side channel.
+    """
+    allowed = allowed_presets(config)
+    if allowed is None or not alias:
+        return True
+    return preset_name_for_alias(config, alias) in allowed
+
+
 def brain_overlay_for(config: dict, alias: str | None) -> dict:
     """Active overlay metadata for the preset serving `alias`.
 

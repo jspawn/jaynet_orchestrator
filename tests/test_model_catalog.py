@@ -993,3 +993,33 @@ def test_gpu_preset_ram_fit_both_ways(monkeypatch):
     _wire_plan(monkeypatch, cat, slots=("embed",), memavail=10.0)
     plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target))
     assert [r.get("slot") for r in plan] == ["embed"]
+
+
+def test_one_gpu_specialist_swap_evicts_brain(monkeypatch):
+    """A same-card specialist needs the brain stopped, not just its own slot."""
+    import copy as _copy
+    cat = _copy.deepcopy(CATALOG)
+    cat["models"]["slots"] = {"brain": "brain", "specialist": "specialist"}
+    cat["models"]["presets"]["specialist"]["gpu"] = "0"
+    _wire_plan(monkeypatch, cat, slots=("brain", "specialist"))
+    monkeypatch.setattr(M.S, "gpus_free_gib", lambda ctx, gs: {str(g): 5.0 for g in gs})
+    target = cat["models"]["presets"]["specialist"]
+    plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target, include_brain=True))
+    assert "brain" in {r.get("slot") for r in plan}
+
+
+def test_cpu_specialist_swap_evicts_unmeasured_cpu_brain(monkeypatch):
+    """CPU-only delegation must not load two large models with unknown RAM."""
+    cat = {"models": {
+        "presets": {
+            "brain": {"preset": "", "alias": "local-orchestrator",
+                      "port": 8090, "gpu": ""},
+            "coder": {"preset": "", "alias": "local-specialist",
+                      "port": 8080, "gpu": ""},
+        },
+        "slots": {"brain": "brain", "specialist": ""},
+    }, "tools": {"serve": {}}}
+    _wire_plan(monkeypatch, cat, slots=("brain",))
+    target = cat["models"]["presets"]["coder"]
+    plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target, include_brain=True))
+    assert [r.get("slot") for r in plan] == ["brain"]

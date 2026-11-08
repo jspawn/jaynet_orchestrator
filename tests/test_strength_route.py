@@ -354,3 +354,90 @@ def test_generation_probe_failure_preserves_error_and_restores(monkeypatch):
     assert r.result["swap_back"] == "restored occamy-q8"
     assert restored == [[{"slot": "brain", "preset": "occamy-q8"}]]
     assert ctx.spawn_calls == []
+
+
+def test_delegate_starting_specialist_is_awaited_and_brain_restored(monkeypatch):
+    """A slow ServeStart 'starting' response is pending, not a failed swap."""
+    state = {"slot": SPECIALIST_LIVE}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return state["slot"] if slot == "specialist" else None
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+    evicted = [{"kind": "slot", "slot": "brain", "preset": "occamy-q8"}]
+
+    class _StartingModelUse:
+        async def execute(self, args, ctx):
+            state["slot"] = {"preset": "dolphin", "alias": "local-dolphin",
+                             "strengths": ["security"], "serving": "dolphin"}
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"status": "starting", "hint": "still loading",
+                                      "evicted": evicted})
+
+    restored = []
+
+    async def fake_restore(ctx, records):
+        restored.append(records)
+        return ["restored occamy-q8"]
+
+    monkeypatch.setattr(catalog, "ModelUse", _StartingModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    ctx = _Ctx(CFG)
+    result = asyncio.run(SpecialistDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert result.status == "ok", result.error
+    assert ctx.spawn_calls[0]["model"] == "local-dolphin"
+    assert restored == [evicted]
+
+
+def test_delegate_failed_swap_restores_before_fallback(monkeypatch):
+    """The old path spawned on the evicted brain while it was still loading."""
+    _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
+    evicted = [{"kind": "slot", "slot": "brain", "preset": "occamy-q8"}]
+
+    class _FailedModelUse:
+        async def execute(self, args, ctx):
+            return ToolResult(status="error", error="launch failed",
+                              result={"status": "error", "evicted": evicted})
+
+    calls = []
+
+    async def fake_restore(ctx, records):
+        calls.append("restore")
+        assert records == evicted
+        return ["restored occamy-q8"]
+
+    monkeypatch.setattr(catalog, "ModelUse", _FailedModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    ctx = _Ctx(CFG)
+
+    async def checked_spawn(task, **kwargs):
+        assert calls == ["restore"]
+        return await _Ctx.spawn(ctx, task, **kwargs)
+    ctx.spawn = checked_spawn
+    result = asyncio.run(SpecialistDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert result.status == "ok", result.error
+    assert calls == ["restore"]
+    assert ctx.spawn_calls[0]["model"] == "local-specialist"
+
+
+def test_delegate_restore_failure_prevents_any_child(monkeypatch):
+    _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
+    evicted = [{"kind": "slot", "slot": "brain", "preset": "occamy-q8"}]
+
+    class _FailedModelUse:
+        async def execute(self, args, ctx):
+            return ToolResult(status="error", error="launch failed",
+                              result={"status": "error", "evicted": evicted})
+
+    async def failed_restore(ctx, records):
+        return ["FAILED to restore occamy-q8"]
+
+    monkeypatch.setattr(catalog, "ModelUse", _FailedModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", failed_restore)
+    ctx = _Ctx(CFG)
+    result = asyncio.run(SpecialistDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert result.status == "error"
+    assert "restore failed" in result.error
+    assert ctx.spawn_calls == []

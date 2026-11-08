@@ -3751,6 +3751,7 @@ function evBmVarRow(v){
   tr.innerHTML='<td><input class="bm-label" style="width:180px"></td>'+
     '<td><input class="bm-model" placeholder="(blank = current brain)" style="width:180px"></td>'+
     '<td><select class="bm-harness"><option value="full">full</option><option value="brain">brain only</option></select></td>'+
+    '<td><input class="bm-allowed" placeholder="blank = all" title="Run-local allowed preset names, comma-separated. Use only the current brain preset to block specialist/swap/child/LLM routing to other models." style="width:140px"></td>'+
     '<td><input class="bm-sampling" style="width:220px;font-family:var(--mono)"></td>'+
     '<td><input class="bm-noskills" placeholder="e.g. long-document" title="Comma-separated skill names this variant runs WITHOUT — hidden from the catalog, skill.load refuses. For A/Bs like same brain ± a skill." style="width:150px"></td>'+
     '<td><input class="bm-guards" list="bmGuardNames" placeholder="e.g. just_reply" title="Guard ablation: comma-separated guard names this variant runs WITHOUT (rail off = does the rail pay?). Unknown names are rejected with the full list." style="width:130px"></td>'+
@@ -3761,6 +3762,7 @@ function evBmVarRow(v){
   tr.querySelector(".bm-label").value=v&&v.label||"";
   tr.querySelector(".bm-model").value=v&&v.model||"";
   tr.querySelector(".bm-harness").value=(v&&v.harness)||"full";
+  tr.querySelector(".bm-allowed").value=v&&v.allowed_presets||"";
   tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
   tr.querySelector(".bm-noskills").value=v&&v.disabled_skills||"";
   tr.querySelector(".bm-guards").value=v&&v.guards_off||"";
@@ -3791,6 +3793,8 @@ function evBmCollect(){
     }
     variants.push({label, model:tr.querySelector(".bm-model").value.trim()||null,
                    harness:tr.querySelector(".bm-harness").value,
+                   allowed_presets:tr.querySelector(".bm-allowed").value.split(",")
+                     .map(x=>x.trim()).filter(Boolean),
                    disabled_skills:tr.querySelector(".bm-noskills").value.split(",")
                      .map(x=>x.trim()).filter(Boolean),
                    guards_off:tr.querySelector(".bm-guards").value.split(",")

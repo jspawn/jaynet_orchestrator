@@ -237,6 +237,7 @@ class EvalExperimentRequest(BaseModel):
 class EvalBenchmarkVariant(BaseModel):
     label: str                               # recorded as the result's brain
     model: str | None = None                 # LiteLLM alias; None = current brain
+    allowed_presets: list[str] | None = None  # local model routing allowlist; None = all
     sampling: dict | None = None             # e.g. {"temperature": 0, "seed": 42}
     reps: int = 3                            # repetitions per case
     harness: str = "full"                    # "full" | "brain" (no delegation tools)

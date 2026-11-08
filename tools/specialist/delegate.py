@@ -640,6 +640,7 @@ class SpecialistDelegate(Tool):
             # model; no tag preset at all → the allround specialist.
             from tools.model.catalog import (
                 ModelUse,
+                restore_evicted,
                 route_strength,
                 route_strength_exact,
                 strength_route,
@@ -660,15 +661,15 @@ class SpecialistDelegate(Tool):
                          "include_brain": True}, run.ctx)
                 finally:
                     run.ctx._allow_brain_evict = False
+                # Keep the restore list even when the model is still starting
+                # or its launch failed after eviction. `starting` is pending,
+                # not failure: poll the exact route and generation probe.
+                run.evicted = list((res.result or {}).get("evicted") or [])
+                launch = res.result or {}
+                launch_state = str(launch.get("status") or launch.get("state") or "")
                 ok = (res.status == "ok"
-                      and not (res.result or {}).get("hint"))
+                      and (not launch.get("hint") or launch_state == "starting"))
                 if ok:
-                    run.evicted = list((res.result or {}).get("evicted") or [])
-                    # ServeStart accepted the launch, but the model loads for
-                    # tens of seconds — a single immediate confirm probe sees
-                    # a still-empty port and would fall back to the brain
-                    # with the specialist already stopped (live evidence:
-                    # first v1.7.3 swap). Poll until the exact holder answers.
                     try:
                         wait_s = float(run.cfg.get("swap_wait_s", 120))
                     except (TypeError, ValueError):
@@ -683,7 +684,7 @@ class SpecialistDelegate(Tool):
                         await asyncio.sleep(2.0)
                     ok = bool(confirm)
                 if ok:
-                    from tools.model.catalog import live_slot, restore_evicted
+                    from tools.model.catalog import live_slot
                     preset_cfg = ((run.ctx.config.get("models") or {})
                                   .get("presets") or {}).get(plan["preset"]) or {}
                     slot = await live_slot(run.ctx.config)
@@ -719,9 +720,26 @@ class SpecialistDelegate(Tool):
                                              f"the generation probe — running the "
                                              f"{run.wanted} task", ok=True)
                 else:
+                    # ModelUse may already have rolled back a post-eviction
+                    # launch error. Otherwise restore HERE, before an allround
+                    # or default-brain child can touch the evicted endpoint.
+                    prior_restore = (res.result or {}).get("restore")
+                    notes = ([str(prior_restore)] if prior_restore is not None
+                             else await restore_evicted(run.ctx, run.evicted))
+                    run.evicted = []
+                    run.swap_back_note = "; ".join(notes)
+                    failed = [n for n in notes if n.startswith("FAILED")]
                     run.swap_note = (f"could not swap in '{plan['preset']}' "
-                                     f"({res.error or (res.result or {}).get('status')})"
-                                     " — fell back to the allround route")
+                                     f"({res.error or (res.result or {}).get('status')})")
+                    if failed:
+                        error = (run.swap_note + "; restore failed: "
+                                 + run.swap_back_note)
+                        await _progress(run.ctx, error, ok=False)
+                        return ToolResult(
+                            status="error", tool_name=self.name,
+                            result={"status": "error", "preset": plan["preset"],
+                                    "swap_back": run.swap_back_note}, error=error)
+                    run.swap_note += " — fell back to the allround route"
                     await _progress(run.ctx, f"swap of '{plan['preset']}' failed — "
                                              "falling back to the allround route",
                                     ok=False)

@@ -191,10 +191,13 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
     """Shared implementation. Returns a ToolResult carrying content + token usage."""
     _, thinking_off, _ = _maps(ctx.config)
     model = resolve_model_alias(alias, ctx.config)
-    if model is None:
-        return ToolResult(status="error", result=None,
-                          error=f"unknown model alias '{alias}'. "
-                                f"valid: {', '.join(valid_model_names(ctx.config))}")
+    from runtime.preset_store import alias_allowed
+    if model is None or not alias_allowed(ctx.config, model):
+        error = (f"unknown model alias '{alias}'. "
+                 f"valid: {', '.join(valid_model_names(ctx.config))}"
+                 if model is None else
+                 f"model '{model}' is not in this run's allowed_presets")
+        return ToolResult(status="error", result=None, error=error)
     # Image call aimed at the local vision slot? Its failures get the
     # actionable "assign a vision preset" wrapper (the slot ships empty).
     vision_target = bool(images) and model == resolve_model_alias(

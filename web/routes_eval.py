@@ -143,6 +143,26 @@ def _benchmark_variant(v, runtime, labels: set, alias_cache: dict) -> dict:
                 status_code=400,
                 detail=f"unknown model '{model}'. valid: "
                        f"{', '.join(sorted(alias_cache['aliases']))}")
+    allowed = list(dict.fromkeys(
+        str(name).strip() for name in (v.allowed_presets or [])
+        if str(name).strip())) or None
+    if allowed:
+        from runtime.preset_store import preset_name_for_alias
+        models = runtime.config.get("models") or {}
+        presets = models.get("presets") or {}
+        slotted = {name for name in (models.get("slots") or {}).values() if name}
+        inactive = [name for name in allowed
+                    if name not in presets
+                    or (presets[name].get("archived") and name not in slotted)]
+        if inactive:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown or inactive allowed_presets on '{label}': "
+                       + ", ".join(inactive))
+        if model and preset_name_for_alias(runtime.config, model) not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"model '{model}' is outside allowed_presets on '{label}'")
     labels.add(label)
     disabled_skills = [str(s).strip() for s in (v.disabled_skills or [])
                        if str(s).strip()]
@@ -190,7 +210,7 @@ def _benchmark_variant(v, runtime, labels: set, alias_cache: dict) -> dict:
                 detail=f"unknown base_system '{base_system}' on "
                        f"'{label}' — prompts/{base_system}.md "
                        "not found")
-    return {"label": label, "model": model,
+    return {"label": label, "model": model, "allowed_presets": allowed,
             "sampling": v.sampling, "reps": v.reps,
             "harness": harness,
             "disabled_skills": disabled_skills,

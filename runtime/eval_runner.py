@@ -2213,6 +2213,10 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
         if ((variant or {}).get("harness") == "brain"
                 or (variant or {}).get("tools_only") is not None):
             run_overrides["architect_mode"] = "direct"
+        if variant and variant.get("allowed_presets"):
+            # Run-local model routing restriction; the shared catalog is untouched.
+            run_overrides["config_patch"].setdefault("models", {})[
+                "allowed_presets"] = list(variant["allowed_presets"])
         if variant and variant.get("sampling"):
             run_overrides["sampling"] = dict(variant["sampling"])
             # Cross-model variants must still get the pinned sampling —

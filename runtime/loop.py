@@ -1324,7 +1324,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # (audit #1 phase 2) — child allowlist narrowing, sub-budget carving,
         # nested confirm/ask, the cloud spawn gate and parent reconciliation.
         spawn_svc = SpawnService(
-            runtime=self, rs=rs, emit=emit, depth=depth, max_depth=max_depth,
+            runtime=self, run_config=run_config, rs=rs, emit=emit,
+            depth=depth, max_depth=max_depth,
             brain_gate=brain_gate, agent_cfg=a_cfg, run_overrides=_ro,
             run_id=run_id, confirm_provider=confirm_provider,
             ask_provider=ask_provider, share_private=share_private_outer,

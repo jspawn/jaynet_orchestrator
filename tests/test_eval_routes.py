@@ -1188,6 +1188,59 @@ async def test_benchmark_variant_control_arm(evalapp, web_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_benchmark_variant_allowed_presets(evalapp, web_client, monkeypatch):
+    """The allowlist validates active/slotted presets and rides run-locally."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    app.state.runtime.config["models"] = {
+        "slots": {"brain": "brain", "specialist": "coder"},
+        "presets": {
+            # Slotted presets stay selectable even when archived (live Q8 shape).
+            "brain": {"alias": "local-orchestrator", "archived": True},
+            "coder": {"alias": "local-specialist"},
+            "retired": {"alias": "local-retired", "archived": True},
+        },
+    }
+    seen = []
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None, should_stop=None):
+        seen.append(variant)
+        if progress:
+            progress(cases[0].id, {"test_id": cases[0].id})
+        return {"cases": 1, "ran": 1, "passed": 1, "failed": 0,
+                "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        for label, allowed in (("unknown", ["missing"]),
+                               ("inactive", ["retired"])):
+            r = await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case", "variants": [
+                                 {"label": label, "reps": 1,
+                                  "allowed_presets": allowed}]})
+            assert r.status_code == 400
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "wrong-model", "reps": 1,
+                              "model": "local-specialist",
+                              "allowed_presets": ["brain"]}]})
+        assert r.status_code == 400
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "brain-only", "reps": 1,
+                              "model": "local-orchestrator",
+                              "allowed_presets": ["brain", "brain"]}]})
+        assert r.status_code == 200, r.text
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen[0]["allowed_presets"] == ["brain"]
+
+
+@pytest.mark.asyncio
 async def test_eval_guards_name_list(evalapp, web_client):
     """The benchmark variant form's completion source: the legal guards_off
     names across the three guard registries + named dispatch gates."""

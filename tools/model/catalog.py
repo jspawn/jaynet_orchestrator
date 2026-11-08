@@ -59,14 +59,21 @@ def tagged_presets(config: dict, wanted: str) -> list[dict]:
     lets a caller say 'dolphin IS tagged security, but stopped'."""
     presets = ((config.get("models") or {}).get("presets") or {})
     out = []
+    from runtime.preset_store import preset_allowed
     for name, p in presets.items():
-        if p.get("archived"):
-            continue               # shelved presets never route
+        if p.get("archived") or not preset_allowed(config, name):
+            continue               # shelved/restricted presets never route
         strengths = list(p.get("strengths") or [])
         if wanted in strengths or "allround" in strengths:
             out.append({"preset": name, "alias": p.get("alias"),
                         "strengths": strengths})
     return out
+
+
+def _route_slot_allowed(config: dict, slot: dict | None) -> bool:
+    from runtime.preset_store import preset_allowed
+    return bool(slot and slot.get("alias")
+                and preset_allowed(config, str(slot.get("preset") or "")))
 
 
 async def route_strength(config: dict, wanted: str) -> str | None:
@@ -81,7 +88,7 @@ async def route_strength(config: dict, wanted: str) -> str | None:
             slot = await live_slot(config, slot=slot_name)
         except Exception:
             slot = None
-        if not slot or not slot.get("alias"):
+        if not slot or not _route_slot_allowed(config, slot):
             continue
         strengths = slot.get("strengths") or []
         if wanted in strengths:
@@ -100,7 +107,8 @@ async def route_strength_exact(config: dict, wanted: str) -> str | None:
             slot = await live_slot(config, slot=slot_name)
         except Exception:
             slot = None
-        if slot and slot.get("alias") and wanted in (slot.get("strengths") or []):
+        if slot and _route_slot_allowed(config, slot) \
+                and wanted in (slot.get("strengths") or []):
             return slot["alias"]
     return None
 
@@ -603,8 +611,12 @@ async def plan_eviction(ctx: ToolContext, p: dict,
                 continue  # remote slots run off-box — nothing to stop here
             sport = int(sp.get("port") or 0)
             cards = set(gpu_list(sp))
-            hit = (port and sport == port) or \
-                  gpu_conflict(cards) or (ram_short and not cards)
+            # Unknown RAM on a CPU-only box must not load a second large
+            # brain alongside the first during an internal specialist swap.
+            cpu_brain_conflict = (include_brain and not needed
+                                  and slot == "brain" and not cards)
+            hit = ((port and sport == port) or gpu_conflict(cards)
+                   or (ram_short and not cards) or cpu_brain_conflict)
             if hit and slot not in seen_slots:
                 seen_slots.add(slot)
                 # What is REALLY on the slot right now (a previous swap may
@@ -717,7 +729,13 @@ async def restore_evicted(ctx: ToolContext, records: list[dict]) -> list[str]:
 
 
 async def _restore_via_model_use(ctx: ToolContext, preset: str) -> bool:
-    res = await ModelUse().execute({"preset": preset, "swap": True}, ctx)
+    # Restoration returns the pre-run hardware state, not a new model route.
+    previous = getattr(ctx, "_model_restrict_bypass", False)
+    setattr(ctx, "_model_restrict_bypass", True)
+    try:
+        res = await ModelUse().execute({"preset": preset, "swap": True}, ctx)
+    finally:
+        setattr(ctx, "_model_restrict_bypass", previous)
     return res.status == "ok" and not (res.result or {}).get("hint")
 
 
@@ -866,6 +884,11 @@ class ModelUse(Tool):
                               error=(f"preset '{name}' is archived — it is shelved and "
                                      f"never routes or serves. Unarchive it in "
                                      f"Admin → Models → Presets to use it again."))
+        from runtime.preset_store import preset_allowed
+        if not getattr(ctx, "_model_restrict_bypass", False) \
+                and not preset_allowed(ctx.config, name):
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"preset '{name}' is not in this run's allowed_presets")
         alias = p.get("alias")
         cfg = _cfg(ctx)
         host = cfg.get("host", "127.0.0.1")

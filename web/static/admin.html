@@ -1001,11 +1001,14 @@
       JayNet's model routing); <i>brain only</i> strips specialist.delegate / architect /
       agent.spawn, so you can A/B what the routing actually buys. A case that
       requires a stripped tool skips instead of failing.
+      <b>Allowed presets</b> is a run-local model allowlist (comma-separated,
+      blank = all). Name only the current brain preset to prevent specialist,
+      swap, spawned-child, and explicit LLM-call routing to other models.
       Pin <code>temperature: 0</code> + a fixed <code>seed</code> for repeatability
       (best-effort: batching and cloud providers still wobble, so run reps and
       compare pass rates, not single runs).
       <span class="note" id="evBmNote"></span></p>
-    <table><thead><tr><th>Label</th><th>Model alias</th><th>Harness</th><th>Sampling (JSON)</th><th>Without skills</th><th>Without guards</th><th>Tools only</th><th>Base prompt</th><th>Reps</th><th></th></tr></thead>
+    <table><thead><tr><th>Label</th><th>Model alias</th><th>Harness</th><th>Allowed presets</th><th>Sampling (JSON)</th><th>Without skills</th><th>Without guards</th><th>Tools only</th><th>Base prompt</th><th>Reps</th><th></th></tr></thead>
       <tbody id="evBmVarRows"></tbody></table>
     <div class="row" style="margin-top:8px">
       <button id="evBmAddVar">+ add variant</button>
@@ -1148,7 +1151,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=19"></script>
+<script src="/static/admin.js?v=20"></script>
 
 </body>
 </html>

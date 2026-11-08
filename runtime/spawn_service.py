@@ -140,6 +140,7 @@ class SpawnService:
     captured; `spawn` is the verbatim extraction."""
 
     runtime: Any                  # AgentRuntime
+    run_config: dict              # run-local config, including model restrictions
     rs: Any                       # RunState
     emit: Any
     depth: int
@@ -173,6 +174,10 @@ class SpawnService:
         # loop.py owns _BRAIN_GATED_CODE_TOOLS (brain-gate tool narrowing) —
         # imported lazily to keep this module import-order-independent.
         from runtime.loop import _BRAIN_GATED_CODE_TOOLS
+        from runtime.preset_store import alias_allowed
+        if model and not alias_allowed(self.run_config, model):
+            return {"status": "error", "answer": "",
+                    "error": f"model '{model}' is not in this run's allowed_presets"}
         # Per-run vision default: a child on an explicitly requested model
         # takes THAT model's capability (slot → preset caps.vision), not the
         # brain's — a text-only specialist must never inherit a vision-True
