@@ -5,6 +5,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.43.0 — 2026-11-08
+
+- **Dependency security:** bump oauthlib from 4.0.0 to 4.0.1 in the LiteLLM
+  lockfile, fixing CVE-2026-49272 in the OAuth device workflow. LiteLLM stays
+  at the tested 1.102.2 pin; the other lockfiles remain unchanged and clean.
+- **External tool compatibility:** verify the existing integrations against
+  h5i 0.5.4 and jevify 0.3.0. No JayNet adapter changes are required; all 78
+  focused h5i/jev/update-check tests pass.
+
 ## 1.42.0 — 2026-11-08
 
 - **Saber backend:** opt-in, pinned ROCm builds for Qwen3.8-27B on one or two
