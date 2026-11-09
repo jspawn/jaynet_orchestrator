@@ -235,10 +235,12 @@ set with the binary dropdown; nothing is rewritten or lost.
 
 ### Saber on R9700
 
-`scripts/build_tools.sh saber rocm` builds the pinned Saber image and release
-binary without downloading weights or starting a server. It requires podman
-or docker and `AMDGPU_TARGETS=gfx1201`. Then download exactly the layout the
-preset needs (TP packs are not interchangeable):
+`scripts/build_tools.sh saber rocm` builds the pinned Saber release binary
+natively on the host without downloading weights or starting a server. It
+requires cargo, ROCm HIP/HSA libraries and `AMDGPU_TARGETS=gfx1201`. The old
+container toolchain remains available as `SABER_BUILD=container
+scripts/build_tools.sh saber rocm`. Download exactly the layout the preset
+needs (TP packs are not interchangeable):
 
 ```bash
 SABER_PACKS=$ORCH_MODELS/saber-packs \
@@ -250,12 +252,13 @@ SABER_PACKS=$ORCH_MODELS/saber-packs \
 Register `$BIN_DIR/saber.rocm/bin/saber` as type `saber` with an empty device
 env. The reference presets `specialist-qwen3.8-27b-saber-tp1.conf` and
 `specialist-qwen3.8-27b-saber-tp2.conf` contain the matching pack paths,
-context and concurrency defaults. Saber starts a detached container;
-`scripts/saber-serve.sh` keeps the JayNet process attached, follows its logs,
-and stops that preset's container on shutdown. Managed presets currently
-cover 27B only; Flash-Next can use upstream's launcher plus a remote preset.
-Container-engine RAM is not attributed to JayNet's wrapper process tree yet;
-use whole-card VRAM and container stats when checking its footprint.
+context and concurrency defaults. Native Saber runs in the foreground;
+`scripts/saber-serve.sh` keeps it in a separate process group and translates
+JayNet's stop SIGTERM into Saber's graceful SIGINT. Its workers remain in the
+normal process-tree RAM measurements. The container fallback instead attaches
+to the detached engine and stops only that preset's container; use container
+stats for its engine RAM. Managed presets currently cover 27B only; Flash-Next
+can use upstream's launcher plus a remote preset.
 
 ## External embed / rerank endpoints
 

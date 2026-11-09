@@ -98,3 +98,70 @@ def test_saber_refuses_unpatched_public_bind(tmp_path):
     assert result.returncode == 1
     assert "loopback-host patch" in result.stderr
     assert not log.exists()
+
+
+def _fake_native(tmp_path):
+    repo, bindir = _fake_runtime(tmp_path)
+    native = repo / "tools" / "serve_27b_native.sh"
+    native.write_text("""#!/usr/bin/env bash
+HOST=${HOST:-127.0.0.1}
+set -u
+printf 'native:%s\\n' "$*" >> "$FAKE_LOG"
+if [[ "${FAKE_WAIT:-0}" != 1 ]]; then exit "${FAKE_START_RC:-0}"; fi
+trap 'printf 'native:interrupted\\n' >> "$FAKE_LOG"; exit 0' INT
+touch "$FAKE_LOG.waiting"
+while true; do sleep 1; done
+""")
+    native.chmod(0o755)
+    return repo, bindir
+
+
+def test_saber_native_runs_in_foreground(tmp_path):
+    repo, bindir = _fake_native(tmp_path)
+    env, log = _env(tmp_path, repo, bindir)
+    env["SABER_RUNTIME"] = "native"
+    result = subprocess.run(
+        [str(SCRIPT), "--enable-prefix-caching", "on"], env=env,
+        capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text()
+    assert "native:--tp 1 --no-build --enable-prefix-caching on" in calls
+    assert "runtime:" not in calls
+
+
+def test_saber_native_sigterm_becomes_process_group_sigint(tmp_path):
+    repo, bindir = _fake_native(tmp_path)
+    env, log = _env(tmp_path, repo, bindir)
+    env.update({"SABER_RUNTIME": "native", "FAKE_WAIT": "1"})
+    proc = subprocess.Popen([str(SCRIPT)], env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    waiting = Path(str(log) + ".waiting")
+    deadline = time.time() + 5
+    while not waiting.exists() and time.time() < deadline:
+        time.sleep(0.02)
+    assert waiting.exists()
+    proc.send_signal(signal.SIGTERM)
+    _, stderr = proc.communicate(timeout=5)
+    assert proc.returncode == 143, stderr.decode()
+    assert "native:interrupted" in log.read_text()
+
+
+def test_saber_container_runtime_remains_explicit_fallback(tmp_path):
+    repo, bindir = _fake_native(tmp_path)
+    env, log = _env(tmp_path, repo, bindir)
+    env["SABER_RUNTIME"] = "container"
+    result = subprocess.run([str(SCRIPT)], env=env,
+                            capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text()
+    assert "launcher:--tp 1 --no-build" in calls
+    assert "runtime:wait saber-jaynet-18080" in calls
+    assert "native:" not in calls
+
+
+def test_build_tools_default_native_and_keep_container_fallback():
+    build = (Path(__file__).parents[1] / "scripts" / "build_tools.sh").read_text()
+    assert 'local mode="${SABER_BUILD:-native}"' in build
+    assert "SABER_BUILD=container" in build
+    assert "cargo build --release -p saber-cli" in build
+    assert 'export SABER_RUNTIME="${mode}"' in build

@@ -35,8 +35,9 @@
 #                                         #  OpenAI/Anthropic/llama-server APIs, .rad
 #                                         #  containers; codeberg.org/StillDeadcode/radiance)
 #    ./build_tools.sh saber rocm         # Saber Rust/HIP engine for Qwen3.8-27B
-#                                         #  (R9700/gfx1201; container build only,
+#                                         #  (R9700/gfx1201; native host build,
 #                                         #  no model packs or server start)
+#    SABER_BUILD=container ./build_tools.sh saber rocm  # container fallback
 #    ./build_tools.sh update             # rebuild everything already built
 #                                         # (every source tree/venv present —
 #                                         #  vanilla trees sync to latest, the
@@ -68,6 +69,7 @@
 #                                        (default https://download.pytorch.org/whl/rocm7.2)
 #             CUDA_ARCHS=89          CUDA arch list (default "native" = auto)
 #             MARCH=znver4           CPU -march for C/C++ (default "native")
+#             SABER_BUILD=native     saber host build (container = fallback)
 #             PIPER_VOICE_DIR=...    piper voices dir (default ~/jaynet-models/piper)
 #
 #  At startup the script asks where to install the built binaries
@@ -2508,13 +2510,18 @@ build_radiance_rocm() {
     install_radiance_prefix "$RADIANCE_ROCM_DIR" rocm
 }
 
-# -- Saber containerized Rust/HIP build (ROCm, gfx1201) -----------------------
+# -- Saber native Rust/HIP build; container build retained as a fallback ------
 install_saber_prefix() {
-    local src_dir="$1" tag dest link
+    local src_dir="$1" mode="$2" tag dest link binary_path
     tag="$(git -C "$src_dir" describe --tags --always 2>/dev/null || echo unknown)"
-    dest="$BIN_DIR/saber.rocm-${tag}"
+    dest="$BIN_DIR/saber.rocm-${tag}-${mode}"
     link="$BIN_DIR/saber.rocm"
-    step "Install saber (rocm) -> ${dest}"
+    if [[ "$mode" == native ]]; then
+        binary_path="target/release/saber"
+    else
+        binary_path=".cache/target-container/release/saber"
+    fi
+    step "Install saber (rocm, ${mode}) -> ${dest}"
     rm -rf "$dest"
     mkdir -p "$dest/bin"
     cp "$SCRIPT_DIR/saber-serve.sh" "$dest/bin/saber-lifecycle"
@@ -2522,6 +2529,7 @@ install_saber_prefix() {
 #!/usr/bin/env bash
 set -euo pipefail
 export SABER_REPO="\${SABER_REPO:-${src_dir}}"
+export SABER_RUNTIME="${mode}"
 exec "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/saber-lifecycle" "\$@"
 EOF
     chmod +x "$dest/bin/saber" "$dest/bin/saber-lifecycle"
@@ -2532,8 +2540,9 @@ EOF
 
 Saber (https://github.com/GGZ14/saber-engine) serves Qwen3.8-27B and
 Qwen3.8-Flash-Next through an OpenAI-compatible API. Source: ${src_dir};
-release binary: .cache/target-container/release/saber. JayNet's managed 27B
-launcher is ${link}/bin/saber (registry type \`saber\`, device_env empty).
+release binary: ${binary_path}. This prefix uses the ${mode} runtime.
+JayNet's managed 27B launcher is ${link}/bin/saber (registry type \`saber\`,
+device_env empty). Native stops translate JayNet's SIGTERM into Saber's SIGINT.
 
 No weights were downloaded. Fetch exactly one TP layout (resumable):
   SABER_PACKS="\${ORCH_MODELS:-\$HOME/jaynet-models}/saber-packs" \\
@@ -2543,15 +2552,22 @@ No weights were downloaded. Fetch exactly one TP layout (resumable):
 
 Reference presets: specialist-qwen3.8-27b-saber-tp1.conf and -tp2.conf.
 TP=1 and TP=2 packs are not interchangeable. Flash-Next needs upstream's
-own launcher or an adopted remote preset in this pass.
+own launcher or an adopted remote preset in this pass. The container build
+remains available with SABER_BUILD=container scripts/build_tools.sh saber rocm.
 EOF
-    ok "Installed saber rocm: $link/bin/saber (see ${dest}/NOTES.md)"
+    ok "Installed saber rocm (${mode}): $link/bin/saber (see ${dest}/NOTES.md)"
 }
 
 apply_saber_patches() {
-    local dir="$1" file="$1/tools/serve_27b.sh"
+    local dir="$1" mode="$2" file="$1/tools/serve_27b.sh"
+    if [[ "$mode" == native ]]; then
+        install -m 755 "$SCRIPT_DIR/saber-27b-native.sh" \
+            "$dir/tools/serve_27b_native.sh"
+        ok "installed saber native launcher"
+        return
+    fi
     # Upstream hardcodes 0.0.0.0 and clap rejects a second --host. Let our
-    # launcher supply HOST instead; default remains loopback for manual runs.
+    # container launcher supply HOST instead; default remains loopback.
     if grep -qF -- '--host ${HOST:-127.0.0.1} --port $PORT' "$file"; then
         ok "saber-loopback-host already applied"
     elif grep -qF -- '--host 0.0.0.0 --port $PORT' "$file"; then
@@ -2563,25 +2579,45 @@ apply_saber_patches() {
 }
 
 build_saber_rocm() {
-    step "Pre-flight (saber ROCm container build)"
-    command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
-        || fail "saber needs podman or docker"
+    local mode="${SABER_BUILD:-native}" rocm="${ROCM_PATH:-/opt/rocm}"
+    [[ "$mode" == native || "$mode" == container ]] \
+        || fail "SABER_BUILD must be native or container, not '$mode'"
+    step "Pre-flight (saber ROCm ${mode} build)"
     [[ "$AMDGPU_TARGETS" == "gfx1201" ]] \
         || fail "saber supports AMDGPU_TARGETS=gfx1201 only"
+    if [[ "$mode" == native ]]; then
+        command -v cargo >/dev/null 2>&1 || fail "saber native needs cargo (Rust >= 1.85)"
+        [[ -f "$rocm/lib/libamdhip64.so.7" && -f "$rocm/lib/libhsa-runtime64.so.1" ]] \
+            || fail "saber native needs ROCm HIP/HSA libraries under ${rocm}/lib"
+    else
+        command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
+            || fail "saber container build needs podman or docker"
+    fi
     pin_repo "$SABER_ROCM_DIR" "$SABER_REPO" "$SABER_COMMIT"
-    apply_saber_patches "$SABER_ROCM_DIR"
+    apply_saber_patches "$SABER_ROCM_DIR" "$mode"
     cd "$SABER_ROCM_DIR"
     if [[ $CLEAN -eq 1 ]]; then
-        step "Clean saber release target (packs/tokenizer stay untouched)"
-        rm -rf .cache/target-container
+        step "Clean saber ${mode} release target (packs/tokenizer stay untouched)"
+        if [[ "$mode" == native ]]; then
+            rm -rf target/release
+        else
+            rm -rf .cache/target-container
+        fi
     fi
-    step "Build saber development image"
-    bash tools/build-image.sh
-    step "Build saber release binary in the development image"
-    bash tools/dev.sh cargo build --release -p saber-cli
-    [[ -x .cache/target-container/release/saber ]] \
-        || fail "saber build produced no .cache/target-container/release/saber"
-    install_saber_prefix "$SABER_ROCM_DIR"
+    if [[ "$mode" == native ]]; then
+        step "Build saber release binary on the host"
+        cargo build --release -p saber-cli
+        [[ -x target/release/saber ]] \
+            || fail "saber build produced no target/release/saber"
+    else
+        step "Build saber development image"
+        bash tools/build-image.sh
+        step "Build saber release binary in the development image"
+        bash tools/dev.sh cargo build --release -p saber-cli
+        [[ -x .cache/target-container/release/saber ]] \
+            || fail "saber build produced no .cache/target-container/release/saber"
+    fi
+    install_saber_prefix "$SABER_ROCM_DIR" "$mode"
 }
 
 # -- Sanity: toolchain ------------------------------------------------------
@@ -2684,17 +2720,26 @@ preflight() {
         fi
     fi
 
-    # Saber: the toolchain is containerized, but the AMD driver nodes and a
-    # container runtime are host requirements. Its shipped kernels are gfx1201.
+    # Saber builds natively by default; its previous container toolchain is a
+    # deliberate fallback. Both serve only with the AMD driver and gfx1201.
     if [[ " ${JOBS_LIST[*]} " == *" saber-rocm "* ]]; then
-        command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
-            || fail "saber needs podman or docker"
+        local saber_mode="${SABER_BUILD:-native}" saber_rocm="${ROCM_PATH:-/opt/rocm}"
+        [[ "$saber_mode" == native || "$saber_mode" == container ]] \
+            || fail "SABER_BUILD must be native or container, not '$saber_mode'"
+        if [[ "$saber_mode" == native ]]; then
+            command -v cargo >/dev/null 2>&1 || fail "saber native needs cargo (Rust >= 1.85)"
+            [[ -f "$saber_rocm/lib/libamdhip64.so.7" && -f "$saber_rocm/lib/libhsa-runtime64.so.1" ]] \
+                || fail "saber native needs ROCm HIP/HSA libraries under ${saber_rocm}/lib"
+        else
+            command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
+                || fail "saber container build needs podman or docker"
+        fi
         [[ -c /dev/kfd && -d /dev/dri ]] \
             || fail "saber needs the AMD kernel driver (/dev/kfd and /dev/dri)"
         command -v curl >/dev/null 2>&1 || fail "curl not found (required for saber)"
         [[ "$AMDGPU_TARGETS" == "gfx1201" ]] \
             || fail "saber supports AMDGPU_TARGETS=gfx1201 only (R9700), not '$AMDGPU_TARGETS'"
-        ok "saber container runtime + gfx1201 target present"
+        ok "saber ${saber_mode} toolchain + gfx1201 target present"
     fi
 
     # pnpm/npm required for SD web UI -- warn once if any SD backend is built
