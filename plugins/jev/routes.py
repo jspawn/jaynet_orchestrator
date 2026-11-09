@@ -122,6 +122,10 @@ def register(app, state) -> None:
         name = str(body.get("preset") or "").strip()
         if not name:
             raise HTTPException(400, "preset is required")
+        # The body await can yield before either request takes the lock.
+        # Check again so overlapping configures refuse instead of queueing.
+        if _CONFIGURE_LOCK.locked():
+            raise HTTPException(409, "another jevify configuration is running")
         async with _CONFIGURE_LOCK:
             try:
                 preset, served, dialect = await admin.selected_preset(

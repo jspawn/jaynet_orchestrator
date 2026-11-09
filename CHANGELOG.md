@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.43.1 — 2026-11-09
+
+- **Plan-gate routing:** descriptive questions, reviews, documentation and
+  non-software planning no longer trigger automatic architect runs. Complex-work
+  patterns require implementation context; actual production and migration
+  actions retain mandatory planning.
+- **jevify administration:** select and probe active local presets from the
+  plugin UI, and reject overlapping configuration requests instead of queueing
+  a second sidecar restart.
+- **Model downloads:** “create preset” now opens the populated preset editor.
+  The brittle admin cache-buster test pin is removed.
+- **Verification:** 2,810 tests pass, with all CI gates and dependency audits
+  clean. Screenshots were not refreshed because the live services were stopped.
+
 ## 1.43.0 — 2026-11-08
 
 - **Dependency security:** bump oauthlib from 4.0.0 to 4.0.1 in the LiteLLM

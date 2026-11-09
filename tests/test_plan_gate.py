@@ -3,6 +3,7 @@ work stays direct, and a triggered failure cannot fall through to inline code.""
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from test_loop_regressions import _final, _Registry, _runtime
 
 from runtime.plan_gate import PlanDecision, choose_plan, maybe_auto_architect
@@ -12,6 +13,21 @@ from runtime.tool_base import ToolResult
 def test_trivial_and_threshold_off_stay_direct():
     assert choose_plan("fix a typo in README.md").action == "direct"
     assert choose_plan("design and implement a new feature", threshold=0).action == "direct"
+
+
+@pytest.mark.parametrize("message", [
+    "explain the design document for the scheduler",
+    "write a blog post about our new feature",
+    "review the data migration script and summarize risks",
+    "what does the schema migration in alembic do?",
+    "plan a birthday party for my kid",
+    "summarize the multi-file diff from yesterday",
+    "document the new feature flags in the README",
+    "explain how the irreversible decision rule works",
+    "what does force-push do?",
+])
+def test_benign_descriptive_and_non_software_requests_stay_direct(message):
+    assert choose_plan(message).action == "direct"
 
 
 def test_complex_and_explicit_plan_actions():
@@ -25,6 +41,8 @@ def test_direct_bypasses_only_discretionary_planning():
     assert choose_plan("design and implement a new feature", mode="direct").action == "direct"
     risky = choose_plan("deploy to production now", mode="direct")
     assert risky.action == "plan" and risky.mandatory
+    migration = choose_plan("apply the schema migration", mode="direct")
+    assert migration.action == "plan" and migration.mandatory
 
 
 def test_plan_mode_forces_plan_only():

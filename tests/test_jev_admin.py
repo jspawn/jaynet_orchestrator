@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
@@ -291,6 +292,54 @@ async def test_probe_failure_does_not_persist_or_restart(admin, monkeypatch):
             "/api/admin/plugins/jev/api/configure", json={"preset": "brain"})
     assert response.status_code == 422
     assert state.users.overrides == {"existing": 1}
+
+
+@pytest.mark.asyncio
+async def test_configure_refuses_overlap_after_body_await(admin, monkeypatch, tmp_path):
+    routes, admin, _, _, app = _routes_state(monkeypatch)
+    bodies = 0
+    both_bodies = asyncio.Event()
+    selected_started = asyncio.Event()
+    finish_selected = asyncio.Event()
+    selected_calls = []
+    original_json = routes.Request.json
+
+    async def delayed_json(request):
+        nonlocal bodies
+        bodies += 1
+        if bodies == 2:
+            both_bodies.set()
+        await both_bodies.wait()
+        return await original_json(request)
+
+    async def selected(config, name):
+        selected_calls.append(name)
+        selected_started.set()
+        await finish_selected.wait()
+        return {**_row(), "endpoint": "http://127.0.0.1:8090"}, "brain-model", "llamacpp"
+
+    async def prepare(preset, served, dialect, reprobe=False):
+        return tmp_path / "brain.yaml", True
+
+    async def restart(manager, recipe, base_url):
+        return {"alive": True}
+
+    monkeypatch.setattr(routes.Request, "json", delayed_json)
+    monkeypatch.setattr(admin, "selected_preset", selected)
+    monkeypatch.setattr(admin, "prepare_recipe", prepare)
+    monkeypatch.setattr(admin, "choose_sidecar_port", lambda mgr, url: 8601)
+    monkeypatch.setattr(admin, "restart_sidecar", restart)
+    async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        tasks = [asyncio.create_task(client.post(
+            "/api/admin/plugins/jev/api/configure", json={"preset": "brain"}))
+            for _ in range(2)]
+        await selected_started.wait()
+        await asyncio.sleep(0)
+        finish_selected.set()
+        responses = await asyncio.gather(*tasks)
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert selected_calls == ["brain"]
 
 
 @pytest.mark.asyncio

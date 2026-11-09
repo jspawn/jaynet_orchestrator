@@ -18,16 +18,33 @@ class PlanDecision:
 
 
 _DIRECT = PlanDecision()
+_READ_ONLY_PREFIXES = (
+    r"^\s*(?:please\s+)?(?:explain|summari[sz]e|review|document|describe)\b",
+    r"^\s*(?:please\s+)?(?:what|how)\s+(?:does|do|is|are|would|could)\b",
+    r"^\s*(?:please\s+)?(?:tell\s+me\s+about|walk\s+me\s+through)\b",
+)
+_GENERIC_PLAN_PATTERN = r"^\s*(?:please\s+)?plan\b"
+_TECHNICAL_CONTEXT = (
+    r"\b(?:api|architecture|backend|bug|class|code|codebase|database|deployment|diff|"
+    r"feature|frontend|function|implementation|migration|module|refactor|release|repo|"
+    r"repository|scheduler|schema|script|server|service|software|tests?)\b",
+)
 _PLAN_PATTERNS = (
-    r"^\s*(?:please\s+)?plan\b", r"\bplan(?:ning)?\s+(?:first|only)\b",
+    r"\bplan(?:ning)?\s+(?:first|only)\b",
     r"\b(?:create|write|draft|produce)\s+(?:a\s+)?(?:design|implementation)\s+plan\b",
-    r"\bdesign\s+(?:doc|document)\b", r"\bdo\s+not\s+implement\b",
-    r"\bdon['’]t\s+implement\b",
+    r"\b(?:create|write|draft|produce)\s+(?:a\s+)?design\s+(?:doc|document)\b",
+    r"\bdo\s+not\s+implement\b", r"\bdon['’]t\s+implement\b",
 )
 _COMPLEX_PATTERNS = (
-    r"\bmulti[- ]file\b", r"\bcodebase[- ]wide\b", r"\bcross[- ]system\b",
+    r"\b(?:implement|build|create|add|develop|code|refactor|update|modify)\b"
+    r"[^.!?\n]{0,100}\bmulti[- ]file\b",
+    r"\bmulti[- ]file\b[^.!?\n]{0,100}\b(?:implementation|refactor|changes?|updates?)\b",
+    r"\bcodebase[- ]wide\b", r"\bcross[- ]system\b",
     r"\bnew\s+(?:system\s+)?architecture\b", r"\bdesign\s+and\s+implement\b",
-    r"\bnew\s+feature\b", r"\b(?:major|large|complex)\s+refactor\b",
+    r"\b(?:implement|build|create|add|develop|code)\b"
+    r"[^.!?\n]{0,100}\bnew\s+feature\b",
+    r"\bnew\s+feature\b[^.!?\n]{0,100}\b(?:implementation|development)\b",
+    r"\b(?:major|large|complex)\s+refactor\b",
     r"\brefactor\s+(?:the\s+)?(?:codebase|architecture|system)\b",
     r"\bambiguous\s+(?:design|scope|requirements?)\b",
     r"\b(?:complex|large)\s+(?:task|project|build)\b",
@@ -37,7 +54,7 @@ _MANDATORY_PATTERNS = (
     r"\bdeploy(?:ing)?\s+(?:to\s+)?production\b", r"\bforce[- ]push\b",
     r"\bdrop\s+(?:the\s+)?(?:database|table)\b",
     r"\bdelete\s+(?:the\s+)?(?:production|shared|database)\b",
-    r"\b(?:data|schema)\s+migration\b", r"\birreversible\b",
+    r"\b(?:run|execute|apply|perform)\s+(?:the\s+)?(?:data|schema)\s+migration\b",
 )
 
 
@@ -60,6 +77,8 @@ def choose_plan(user_message, *, mode: str = "auto", threshold: int = 4) -> Plan
         return _DIRECT
     if mode == "plan":
         return PlanDecision("plan", "user selected plan mode")
+    if _hit(_READ_ONLY_PREFIXES, user_message):
+        return _DIRECT
     risky = _hit(_MANDATORY_PATTERNS, user_message)
     if risky:
         return PlanDecision("plan", f"risky/outward-facing request: {risky}", True)
@@ -68,6 +87,8 @@ def choose_plan(user_message, *, mode: str = "auto", threshold: int = 4) -> Plan
     if mode != "auto" or not threshold:
         return _DIRECT
     planned = _hit(_PLAN_PATTERNS, user_message)
+    if not planned and _hit(_TECHNICAL_CONTEXT, user_message):
+        planned = _hit((_GENERIC_PLAN_PATTERN,), user_message)
     if planned:
         return PlanDecision("plan", f"explicit plan request: {planned}")
     complex_ = _hit(_COMPLEX_PATTERNS, user_message)
