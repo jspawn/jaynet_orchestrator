@@ -74,3 +74,16 @@ def test_eval_pane_organization():
     details = _subpane(html, "sub-studio-details")
     assert (details.index("<h2>Tool telemetry") < details.index("<h2>Per case</h2>")
             < details.index("<h2>Period comparison</h2>"))
+
+
+def test_hf_preset_suggestion_opens_visible_loaded_editor():
+    """Create preset must leave Files for the editor under Models → Presets.
+    Opening Files directly must also fetch the catalog editPreset reads."""
+    src = ADMIN_JS.read_text(encoding="utf-8")
+    block = src.split("async function hfPreset(j){", 1)[1].split("\n}", 1)[0]
+    load = 'if(!_presets) await loadPresets();'
+    navigate = 'goTab("models","presets");'
+    edit = "editPreset(null);"
+    assert load in block and navigate in block and edit in block
+    assert block.index(load) < block.index(navigate) < block.index(edit)
+    assert 'note($("#peNote"),msg,true);' in block

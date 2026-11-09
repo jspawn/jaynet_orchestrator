@@ -853,6 +853,10 @@ async function hfPreset(j){
     "&file="+encodeURIComponent(j.file));
   const s=await r.json().catch(()=>({}));
   if(!r.ok){ note($("#hfNote"),s.detail||"error",false); return; }
+  // The editor lives under Models → Presets, not beside the download job.
+  // Load its catalog first when Files was opened directly, then reveal it.
+  if(!_presets) await loadPresets();
+  goTab("models","presets");
   editPreset(null);
   $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
   $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
@@ -864,7 +868,7 @@ async function hfPreset(j){
   if(s.mmproj&&!s.mmproj.downloaded) missing.push("mmproj ("+s.mmproj.file+")");
   if(s.chat_template&&!s.chat_template.downloaded) missing.push("chat template ("+s.chat_template.file+")");
   if(missing.length) msg+=" — the conf references a "+missing.join(" and ")+" that isn't downloaded yet";
-  note($("#hfNote"),msg,true);
+  note($("#peNote"),msg,true);
 }
 $("#hfList").onclick=hfListFiles;
 $("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); });
