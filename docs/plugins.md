@@ -227,11 +227,14 @@ yourself (setup in the plugin's README, shown in admin → Studio → Plugins). 
 local sidecar options, both speaking the same Jev API:
 
 - **[jevify](https://github.com/fidecastro/jevify) (recommended)** — no new
-  weights at all: it makes a model you already serve (e.g. the coding
-  specialist) answer typed questions from its next-token logprobs and
-  serves the Jev API on its own port. Recipe template ships as
-  `plugins/jev/jevify-recipe.example.yaml`: probe, serve, point
-  `plugins.jev.base_url` at it.
+  weights at all: it makes a model you already serve answer typed questions
+  from its next-token logprobs and serves the Jev API on its own port. Enable
+  the plugin and open its admin UI: select an active (unarchived or slotted) **running local
+  preset**, then **Generate/probe & restart**. JayNet verifies the served model
+  ID, writes and probes a preset-specific recipe under `DATA/jevify`, and
+  restarts only the jevify sidecar — never the model. **Test decision** checks
+  the complete path. A manual recipe/`base_url` setup remains available for
+  advanced deployments.
 - **[Open-Jev](https://github.com/Zefan-Cai/Open-Jev)** — the trained
   checkpoint (LoRA + decision head on Qwen3.5-2B/9B).
 

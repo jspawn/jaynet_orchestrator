@@ -48,43 +48,40 @@ This plugin wires it into JayNet two ways:
   better, MoE reads 2.6x faster — both beat every other local scorer.
   Recipes: /srv/data/jevify/{specialist,cybertiel-brain}.llamacpp.yaml.
 
-## Setup: jevify on the specialist (recommended local backend)
+## Setup: select a running preset (recommended local backend)
 
-No new model, no new GPU burden — jevify borrows the specialist server you
-already run (any llama.cpp/vLLM endpoint with logprobs works):
+No new model, no new GPU burden — jevify borrows a model server you already
+run (any llama.cpp/vLLM endpoint with logprobs works):
 
-```bash
-uv tool install jevify
-cp plugins/jev/jevify-recipe.example.yaml specialist.llamacpp.yaml
-# edit model.name and endpoint.base_url to the specialist's alias/port
-jevify probe specialist.llamacpp.yaml     # verifies readout rungs, fills
-                                          # the answer-token ids
-jevify serve specialist.llamacpp.yaml --port 8600
-```
+1. Install jevify: `uv tool install jevify`.
+2. Enable **Admin → Studio → Plugins → jev**, then open its UI.
+3. Select an active **running local preset** (unarchived or slotted) and click
+   **Generate/probe & restart**. The brain is the safest routing default;
+   an offline specialist cannot answer until started.
+4. Click **Test decision**, then optionally enable `route`.
 
-Then point the plugin at it — same System One contract, just a different
-`base_url` and `model`:
+The selector verifies that the preset's port serves that exact model, writes a
+preset-specific recipe under `$JAYNET_DATA/jevify`, runs `jevify probe`, and
+restarts only the managed jevify sidecar. It never loads or swaps a model and
+never adopts a foreign process on the sidecar port. Use **Reprobe** after
+replacing a model under the same preset name. Recipes are deployment-specific:
+model ID, chat template, answer tokens and supported logprob rungs all matter.
 
-```yaml
-plugins:
-  jev:
-    enabled: true
-    base_url: http://127.0.0.1:8600
-    model: qwen3-8-27b-turbo   # the recipe's model.name
-    route: true                # advisory hook; keyword router stays fallback
-```
+The managed sidecar appears in **Admin → Models → Servers** and follows the web
+service lifecycle. Each run start pays a state ingest on the selected model
+(prefix caching reuses the static head). Measured accuracy earns a routing
+*hint*, not a veto: keywords remain the fallback and `brain_mode: dispatch`
+still owns the hard "no inline coding" gate.
 
-Keep it running with a systemd unit like the other sidecars
-(`ExecStart=jevify serve …`, after the specialist's llama-server) — or let
-JayNet manage it: `manage_sidecar: true` + `recipe: /path/to/recipe.yaml`
-registers `jevify serve …` with the process manager, so the sidecar appears
-in admin → Models → Servers with status/start/stop/restart/logs and follows the
-web service lifecycle (starts at boot, stops at shutdown; the port comes
-from `base_url`, `jevify` must be on PATH). Caveats:
-each run start pays a state ingest on the specialist (llama.cpp prefix
-caching reuses the static head), and 46/52 accuracy earns a *hint*, not a
-veto — the hook is advisory, keywords remain the fallback, and
-`brain_mode: dispatch` still owns the hard "no inline coding" gate.
+### Manual recipe setup (advanced)
+
+For a custom endpoint or a hand-tuned recipe, copy
+`plugins/jev/jevify-recipe.example.yaml`, edit `model.name` and
+`endpoint.base_url`, then run `jevify probe recipe.yaml` and
+`jevify serve recipe.yaml --port 8600`. Set `plugins.jev.base_url` and `model`
+to match. To let JayNet manage that sidecar instead of systemd, also set
+`manage_sidecar: true` and `recipe: /path/to/recipe.yaml`. The preset selector
+replaces these derived fields on its next use.
 
 ## Setup: the Open-Jev sidecar server (alternative)
 

@@ -1603,13 +1603,17 @@ plugins:
     # allow_cloud_route: false  # hard privacy gate: with backend=openrouter the hook
                                # would send EVERY request's text off-box at run start.
                                # The hook refuses the cloud backend unless this is true.
+    preset: ""                 # easiest setup: enable the plugin, open its admin UI,
+                               # select a RUNNING local preset, then Generate/probe &
+                               # restart. This verifies the model and fills the fields
+                               # below automatically; it never loads/swaps a model.
     manage_sidecar: false      # true = run the jevify sidecar as a managed process
                                # (admin → Models → Servers: status/start/stop/restart/logs);
                                # needs `recipe` below and jevify on PATH. false =
                                # you run `jevify serve …` yourself (systemd, nohup).
-    recipe: ""                 # probed jevify recipe the managed sidecar serves,
-                               # e.g. /srv/data/jevify/specialist.llamacpp.yaml
-                               # (port comes from base_url).
+    recipe: ""                 # probed jevify recipe the managed sidecar serves;
+                               # the UI writes per-preset recipes under DATA/jevify
+                               # (the sidecar port comes from base_url).
   imagegen:
     enabled: false           # local text-to-image (plugins/imagegen/README.md).
                              # image.generate hibernates the swap slot(s), serves a

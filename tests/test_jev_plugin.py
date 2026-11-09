@@ -273,14 +273,17 @@ def _register_sidecar(monkeypatch, jev_cfg):
 
 
 def test_sidecar_not_managed_by_default(monkeypatch):
-    """No manage_sidecar (or plugin off) → nothing registered, no hooks."""
+    """No manage_sidecar → no process, but cleanup hooks are pre-registered
+    so a sidecar added later through the admin UI is still hot-removable."""
     mgr, state = _register_sidecar(monkeypatch, {"enabled": True})
     assert mgr.status() == {}
-    assert state.startup_hooks == [] and state.shutdown_hooks == []
+    assert len(state.startup_hooks) == 1 and len(state.shutdown_hooks) == 1
+    asyncio.run(state.shutdown_hooks[0]())       # unmanaged no-op
     mgr2, state2 = _register_sidecar(
         monkeypatch, {"enabled": False, "manage_sidecar": True,
                       "recipe": "/r.yaml"})
     assert mgr2.status() == {}
+    assert state2.startup_hooks == [] and state2.shutdown_hooks == []
 
 
 def test_sidecar_managed_registers_process_and_hooks(monkeypatch):
@@ -314,5 +317,6 @@ def test_sidecar_missing_recipe_not_registered(monkeypatch):
     mgr, state = _register_sidecar(monkeypatch, {
         "enabled": True, "manage_sidecar": True, "recipe": ""})
     assert mgr.status() == {}
-    assert state.startup_hooks == []
+    # Still removable after a later UI configure.
+    assert len(state.startup_hooks) == 1 and len(state.shutdown_hooks) == 1
 

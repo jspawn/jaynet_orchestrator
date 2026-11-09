@@ -4,10 +4,10 @@
 # text generation. The model server is a SIDECAR you run yourself (see
 # README.md); this plugin talks plain HTTP to it and needs no pip deps.
 name: jev
-version: 0.1.0
+version: 0.2.0
 description: >-
-  Decision-model integration (Open-Jev): jev.decide answers
+  Decision-model integration (Open-Jev/jevify): jev.decide answers
   choice/yes-no/score questions with calibrated probabilities, and an
-  optional route_request hook classifies each incoming request into a
-  strength tag for delegation routing.
+  optional route_request hook classifies requests for delegation. The admin
+  UI probes and manages jevify against a selected local model preset.
 requires_jaynet: ">=1.1.0"

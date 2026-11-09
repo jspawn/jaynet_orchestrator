@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jev — JayNet plugin</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--fg:#e6edf3;--muted:#8b949e;
+        --accent:#d4a72c;--ok:#3fb950;--err:#f85149;--line:#30363d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);padding:24px;
+       font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:860px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}h1 span{color:var(--accent)}
+  .muted{color:var(--muted)}.ok{color:var(--ok)}.err{color:var(--err)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+         padding:16px;margin:16px 0}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  select{background:var(--bg);color:var(--fg);border:1px solid var(--line);
+         border-radius:6px;padding:7px;min-width:320px;max-width:100%}
+  button{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+         border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600}
+  button:hover{border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}
+  pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:10px;
+      border-radius:6px;font-size:12px}
+  dt{color:var(--muted);float:left;clear:left;width:110px}dd{margin-left:120px}
+</style>
+</head>
+<body>
+<main>
+  <h1><span>◆</span> jev <span class="muted" style="font-size:12px">typed decisions with jevify</span></h1>
+  <p class="muted">Select a local preset that is already running. JayNet verifies its
+    model ID, probes a model-specific recipe, then restarts only the jevify sidecar.
+    It never swaps or loads a model here.</p>
+
+  <section class="panel">
+    <b>Decision model</b>
+    <div class="row">
+      <select id="preset" aria-label="Local model preset"></select>
+      <label class="muted"><input id="reprobe" type="checkbox"> Reprobe</label>
+      <button id="configure">Generate/probe &amp; restart</button>
+    </div>
+    <p class="muted" style="font-size:12px">Only active local presets appear (unarchived or slotted).
+      An offline selection must be started in Models first. Reprobe after rebuilding
+      a model under the same preset name.</p>
+  </section>
+
+  <section class="panel">
+    <b>Current sidecar</b>
+    <dl>
+      <dt>Preset</dt><dd id="currentPreset" class="muted">—</dd>
+      <dt>Model</dt><dd id="model" class="muted">—</dd>
+      <dt>API</dt><dd id="baseUrl" class="muted">—</dd>
+      <dt>Recipe</dt><dd id="recipe" class="muted">—</dd>
+      <dt>Health</dt><dd id="health" class="muted">—</dd>
+    </dl>
+    <div class="row"><button id="test">Test decision</button></div>
+  </section>
+
+  <section class="panel" id="resultPanel" hidden>
+    <b id="resultTitle">Result</b>
+    <pre id="result"></pre>
+  </section>
+</main>
+<script>
+const API="/api/admin/plugins/jev/api";
+const $=s=>document.querySelector(s);
+let busy=false;
+async function call(path,body){
+  const opts=body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)};
+  const r=await fetch(API+path,opts);
+  if(r.status===401){location.href="/login";throw new Error("unauthorized");}
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.detail||("HTTP "+r.status));
+  return data;
+}
+function setBusy(value){
+  busy=value;
+  $("#configure").disabled=value;
+  $("#test").disabled=value||!$("#baseUrl").textContent||$("#baseUrl").textContent==="—";
+  $("#preset").disabled=value;
+}
+function show(title,data,error=false){
+  $("#resultPanel").hidden=false;
+  $("#resultTitle").textContent=title;
+  $("#resultTitle").className=error?"err":"ok";
+  $("#result").textContent=typeof data==="string"?data:JSON.stringify(data,null,2);
+}
+async function overview(){
+  try{
+    const d=await call("/overview");
+    const select=$("#preset"), wanted=d.settings.preset||select.value;
+    select.replaceChildren();
+    for(const p of d.presets){
+      const option=document.createElement("option");
+      option.value=p.name;
+      const slots=p.slots.length?" ["+p.slots.join(",")+"]":"";
+      option.textContent=p.name+" — "+p.backend+slots+(p.running?" · running":" · offline");
+      select.appendChild(option);
+    }
+    if(wanted && d.presets.some(p=>p.name===wanted)) select.value=wanted;
+    $("#currentPreset").textContent=d.settings.preset||"not configured";
+    $("#model").textContent=d.settings.model||"—";
+    $("#baseUrl").textContent=d.settings.base_url||"—";
+    $("#recipe").textContent=d.settings.recipe||"—";
+    const healthy=d.health&&d.health.ok;
+    $("#health").textContent=healthy?"healthy":(d.process&&d.process.alive?"running, health pending":"not healthy");
+    $("#health").className=healthy?"ok":"muted";
+    if(!d.binary) show("jevify missing","Install with: uv tool install jevify",true);
+    setBusy(false);
+  }catch(e){show("Could not load jevify status",e.message,true);}
+}
+$("#configure").onclick=async()=>{
+  if(!$("#preset").value)return;
+  setBusy(true);show("Probing","Verifying the model and running jevify probe…");
+  try{
+    const d=await call("/configure",{preset:$("#preset").value,reprobe:$("#reprobe").checked});
+    show("jevify ready",d);await overview();
+  }catch(e){show("Configuration failed",e.message,true);setBusy(false);}
+};
+$("#test").onclick=async()=>{
+  setBusy(true);
+  try{show("Decision result",await call("/test",{}));}
+  catch(e){show("Decision failed",e.message,true);}
+  finally{setBusy(false);}
+};
+overview();
+</script>
+</body>
+</html>
