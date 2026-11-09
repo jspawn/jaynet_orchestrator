@@ -192,14 +192,25 @@ class BrainOverlayStore:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        # Set this before WAL: changing journal mode can itself wait for a peer.
+        conn.execute("PRAGMA busy_timeout=10000")
         return conn
 
     def ensure(self) -> None:
-        with self._conn() as conn:
-            conn.executescript("PRAGMA journal_mode=WAL;\n"
-                               "PRAGMA synchronous=NORMAL;\n"
-                               "PRAGMA busy_timeout=10000;")
-            conn.executescript(SCHEMA)
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                with self._conn() as conn:
+                    conn.executescript("PRAGMA journal_mode=WAL;\n"
+                                       "PRAGMA synchronous=NORMAL;")
+                    conn.executescript(SCHEMA)
+                return
+            except sqlite3.OperationalError as e:
+                # Concurrent WAL transitions can report locked immediately,
+                # even with busy_timeout set before the PRAGMA.
+                if "locked" not in str(e).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
 
     @staticmethod
     def _row(row: sqlite3.Row | None, preset: str) -> dict:

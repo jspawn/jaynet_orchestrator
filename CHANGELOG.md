@@ -5,6 +5,18 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.43.2 — 2026-11-09
+
+- **Native Saber:** build and run Qwen3.8-27B directly on the host with the
+  pinned upstream checkout and shipped gfx1201 kernels. The lifecycle wrapper
+  translates JayNet's stop SIGTERM into process-group SIGINT; the previous
+  container build/runtime remains available with `SABER_BUILD=container`.
+- **Overlay-store reliability:** concurrent WAL/schema initialization now sets
+  its busy timeout before enabling WAL and retries transient lock errors,
+  preventing sporadic `database is locked` failures during concurrent accepts.
+- **Verification:** 2,815 tests pass, including 50 consecutive repetitions of
+  the overlay concurrency regressions; all CI gates and dependency audits clean.
+
 ## 1.43.1 — 2026-11-09
 
 - **Plan-gate routing:** descriptive questions, reviews, documentation and

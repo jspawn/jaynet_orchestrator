@@ -198,6 +198,29 @@ def test_concurrent_accepts_serialize_and_keep_one_lesson(tmp_path, monkeypatch)
     assert len(store.history("brain-a")) == 1
 
 
+def test_concurrent_ensure_waits_for_wal_lock(tmp_path):
+    db_path = tmp_path / "presets.db"
+    blocker = sqlite3.connect(db_path)
+    blocker.execute("CREATE TABLE seed (id INTEGER)")
+    blocker.commit()
+    blocker.execute("BEGIN EXCLUSIVE")
+    finished = threading.Event()
+
+    def initialize():
+        BrainOverlayStore(db_path).ensure()
+        finished.set()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(initialize)
+            assert not finished.wait(0.1), "WAL setup did not wait for the writer"
+            blocker.rollback()
+            future.result(timeout=2)
+    finally:
+        blocker.close()
+    assert finished.is_set()
+
+
 @pytest.mark.asyncio
 async def test_cross_model_variant_excludes_brain_overlay_from_judge_and_provenance(
         monkeypatch):
