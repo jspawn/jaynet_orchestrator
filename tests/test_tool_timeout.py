@@ -84,6 +84,8 @@ def test_shipped_overrides_cover_internal_budgets():
     internal = {
         "llm.call": float((tools.get("llm") or {}).get("vision_timeout_s", 600)),
         "lint.run": float((tools.get("lint") or {}).get("timeout_s", 120)),
+        # OmniVoice plugin server defaults: 300s health wait + 300s generation.
+        "audio.speak": 600.0,
         # imagegen plugin server defaults (plugins/imagegen/server.py):
         # 300s cold-start health wait + 900s generation.
         "image.generate": 1200.0,
@@ -106,3 +108,11 @@ def test_shipped_orchestrators_stay_untimed():
     overrides = cfg["tools"]["call_timeout_overrides"]
     for name in ("architect", "agent.spawn", "agent.fanout", "chain.run"):
         assert overrides.get(name) == 0, f"{name} lost its 0 override"
+
+
+def test_shipped_document_indexing_stays_untimed():
+    """A whole-document indexing pass has no internal time bound; the generic
+    180s wrapper must not abandon it before the persistent index is built."""
+    cfg = yaml.safe_load(SHIPPED.read_text(encoding="utf-8"))
+    overrides = cfg["tools"]["call_timeout_overrides"]
+    assert overrides.get("doc.index") == 0

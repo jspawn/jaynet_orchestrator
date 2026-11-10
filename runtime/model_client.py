@@ -280,6 +280,8 @@ def _served_mismatch(requested: str | None, served: str | None) -> bool:
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
+    config: dict
+
     @property
     def _think_aliases(self) -> frozenset | None:
         # Test harnesses and embedders that bypass AgentRuntime.__init__ get

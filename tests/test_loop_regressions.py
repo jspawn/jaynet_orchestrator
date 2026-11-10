@@ -4,7 +4,6 @@ must never widen into tools the parent didn't have. The real loop is driven
 with a fake model (instance-level _model_turn) over a stub registry/trace —
 no network, no LiteLLM."""
 import asyncio
-import gc
 import json
 import re
 import tempfile
@@ -806,9 +805,20 @@ def test_strip_think_gemma4_channel_markup_removed():
     assert _strip_think("a<think>x</think>b") == "ab"
 
 
-def test_tmp_dir_cleaned_when_setup_raises():
+def test_tmp_dir_cleaned_when_setup_raises(monkeypatch):
     # An exception between tmp-dir creation and the loop's main try (here: the
-    # tool selector blowing up) must not leak the per-run scratch dir.
+    # tool selector blowing up) must not leak the per-run scratch dir. Invoke
+    # the finalizer explicitly: GC timing under xdist is not a reliable oracle.
+    import runtime.loop as loop_mod
+    created = []
+    real_setup = loop_mod._setup_scratch
+
+    def capture_setup(*args):
+        path, tmp_obj = real_setup(*args)
+        created.append(tmp_obj)
+        return path, tmp_obj
+
+    monkeypatch.setattr(loop_mod, "_setup_scratch", capture_setup)
     rt, _ = _runtime(_Registry([]), [])
 
     class _BoomSelector:
@@ -823,7 +833,8 @@ def test_tmp_dir_cleaned_when_setup_raises():
         asyncio.run(rt.run("hi", run_id=rid))
     except RuntimeError:
         pass
-    gc.collect()                                       # drop frames -> finalizer runs
+    assert len(created) == 1 and created[0] is not None
+    created[0].cleanup()
     leaked = [p for p in tmp.glob(f"orchrun-{rid[:8]}-*") if p not in before]
     assert leaked == []
 

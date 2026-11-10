@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.45.2 — 2026-11-10
+
+- **Audit follow-ups:** declare the model-client mixin's configuration contract,
+  restoring a green mypy gate without banking new baseline errors. Admin static
+  tests now accept any numeric cache buster instead of pinning one release's
+  values, and the scratch-cleanup regression uses explicit finalization instead
+  of flaky GC timing.
+- **Long-running tools:** `audio.speak` gets a 660-second wrapper above its
+  cold-start plus generation budget; persistent whole-document `doc.index`
+  builds are no longer cut off by the generic 180-second tool timeout.
+- **Documentation:** refresh the live admin, account, chat and login screenshots,
+  including preset priority and benchmark allowed-presets.
+- **Verification:** the full test suite and all release gates pass; the py3.11
+  cleanup regression also passes 20 consecutive repetitions.
+
 ## 1.45.1 — 2026-11-10
 
 - **Flash-Next compatibility:** native Saber launches accept the checkpoint's

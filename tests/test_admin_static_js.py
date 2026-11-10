@@ -72,8 +72,9 @@ def test_preset_catalog_priority_drag_drop_hooks():
     assert "not a specialist candidate" in js
     assert "last fallback" in js and 'p.alias==="local-orchestrator"' in js
     assert ".preset-drag-handle" in css and ".preset-drop-after" in css
-    assert '/static/admin.js?v=22' in html
-    assert '/static/admin.css?v=4' in html
+    # Asset references need a numeric buster, not one specific release's value.
+    assert re.search(r"/static/admin\.js\?v=\d+", html)
+    assert re.search(r"/static/admin\.css\?v=\d+", html)
 
 
 def _subpane(html: str, pane_id: str) -> str:
