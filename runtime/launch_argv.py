@@ -61,10 +61,29 @@ def parse_conf(path: str) -> dict[str, str]:
 
 def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
                port: str, alias: str) -> dict[str, str]:
-    """Validate the two pre-sharded 27B packs and render upstream's env."""
+    """Validate a managed Saber pack and render its native launcher's env."""
+    model = (conf.get("MODEL_PATH") or "").strip()
+    if conf.get("SABER_MODEL") == "flashnext":
+        if len(cards) != 2:
+            raise ValueError("saber Flash-Next needs two GPUs (TP=2)")
+        if not os.path.isdir(model):
+            raise ValueError(f"saber Flash-Next pack directory not found: {model}")
+        for relative in ("manifest.json", "rank0/trunk8.pack", "rank1/trunk8.pack"):
+            if not os.path.isfile(os.path.join(model, relative)):
+                raise ValueError(f"saber Flash-Next pack file not found: {model}/{relative}")
+        env = {
+            "PORT": str(port), "HOST": host, "SABER_MODEL": "flashnext",
+            "PACK": model, "SABER_NVME": os.path.dirname(os.path.dirname(
+                os.path.abspath(model))),
+            "MODEL": alias or "Qwen3.8-Flash-Next",
+            "CNAME": f"saber-jaynet-{port}", "HIP_DEVICES": ",".join(cards),
+        }
+        if conf.get("CTX_SIZE"):
+            env["MAX_CTX"] = conf["CTX_SIZE"]
+        return env
+
     if len(cards) not in (1, 2):
         raise ValueError("saber 27B needs one GPU (TP=1) or two GPUs (TP=2)")
-    model = (conf.get("MODEL_PATH") or "").strip()
     draft = (conf.get("MTP_MODEL") or "").strip()
     if not model or not draft:
         raise ValueError("saber needs MODEL_PATH (target pack directory) and "

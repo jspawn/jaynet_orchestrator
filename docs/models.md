@@ -278,8 +278,14 @@ context and concurrency defaults. Native Saber runs in the foreground;
 JayNet's stop SIGTERM into Saber's graceful SIGINT. Its workers remain in the
 normal process-tree RAM measurements. The container fallback instead attaches
 to the detached engine and stops only that preset's container; use container
-stats for its engine RAM. Managed presets currently cover 27B only; Flash-Next
-can use upstream's launcher plus a remote preset.
+stats for its engine RAM.
+
+Flash-Next is also managed natively, TP=2 only. Fetch its pack and referenced
+checkpoint with `tools/fetch_packs.sh flashnext`, then use
+`specialist-qwen3.8-flashnext-saber-tp2.conf`. Its `SABER_MODEL=flashnext`
+selects `scripts/saber-flashnext-native.sh`; no separate DFlash2 pack is
+needed. Keep the original checkpoint at the absolute path recorded in the
+pack manifest and PLE index. The managed Flash-Next path is native-only.
 
 ## External embed / rerank endpoints
 

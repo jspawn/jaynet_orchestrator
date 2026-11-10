@@ -4,7 +4,15 @@
 set -uo pipefail
 
 SABER_REPO="${SABER_REPO:-}"
+SABER_MODEL="${SABER_MODEL:-27b}"
 NATIVE_LAUNCHER="$SABER_REPO/tools/serve_27b_native.sh"
+if [[ "$SABER_MODEL" == flashnext ]]; then
+    NATIVE_LAUNCHER="${SABER_FLASHNEXT_LAUNCHER:-$SABER_REPO/tools/serve_flashnext_native.sh}"
+    # The pinned build tree need not carry the fork's native Flash-Next script.
+    if [[ ! -x "$NATIVE_LAUNCHER" && -n "${JAYNET_HOME:-${ORCH_HOME:-}}" ]]; then
+        NATIVE_LAUNCHER="${JAYNET_HOME:-${ORCH_HOME}}/scripts/saber-flashnext-native.sh"
+    fi
+fi
 RUNTIME="${SABER_RUNTIME:-auto}"
 if [[ "$RUNTIME" != auto && "$RUNTIME" != native && "$RUNTIME" != container ]]; then
     echo "saber: SABER_RUNTIME must be auto, native or container" >&2
@@ -12,7 +20,10 @@ if [[ "$RUNTIME" != auto && "$RUNTIME" != native && "$RUNTIME" != container ]]; 
 fi
 
 TP_ARGS=()
-if [[ -n "${DEVICE:-}" ]]; then
+if [[ "$SABER_MODEL" == flashnext ]]; then
+    [[ "${HIP_DEVICES:-}" =~ ^[0-9]+,[0-9]+$ ]] \
+        || { echo "saber: Flash-Next needs HIP_DEVICES=<card,card> (TP=2)" >&2; exit 1; }
+elif [[ -n "${DEVICE:-}" ]]; then
     TP_ARGS=(--tp 1)
 elif [[ -n "${HIP_DEVICES:-}" ]]; then
     TP_ARGS=(--tp 2)
@@ -22,7 +33,8 @@ else
 fi
 
 if [[ "$RUNTIME" != container && -x "$NATIVE_LAUNCHER" ]]; then
-    if ! grep -qF -- 'HOST=${HOST:-127.0.0.1}' "$NATIVE_LAUNCHER"; then
+    if [[ "$SABER_MODEL" != flashnext ]] \
+        && ! grep -qF -- 'HOST=${HOST:-127.0.0.1}' "$NATIVE_LAUNCHER"; then
         echo "saber: native launcher lacks the loopback default; run build_tools.sh saber rocm" >&2
         exit 1
     fi
@@ -51,7 +63,7 @@ if [[ "$RUNTIME" != container && -x "$NATIVE_LAUNCHER" ]]; then
     rc=$?
     exit "$rc"
 fi
-if [[ "$RUNTIME" == native ]]; then
+if [[ "$RUNTIME" == native || "$SABER_MODEL" == flashnext ]]; then
     echo "saber: native launcher not executable: $NATIVE_LAUNCHER" >&2
     exit 1
 fi

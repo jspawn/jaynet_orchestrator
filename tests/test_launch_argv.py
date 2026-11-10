@@ -186,3 +186,37 @@ def test_saber_rejects_wrong_tp_or_missing_draft(tmp_path):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
     with pytest.raises(ValueError, match="one GPU"):
         build_argv("saber", conf, **_kwargs(gpu="0,1,2"))
+
+
+def _flashnext_conf(tmp_path):
+    pack = tmp_path / "nvme" / "saber-packs" / "qwen38-flashnext-quark-trunk8"
+    for rank in ("rank0", "rank1"):
+        (pack / rank).mkdir(parents=True, exist_ok=True)
+        (pack / rank / "trunk8.pack").write_text("SBRPACK1")
+    (pack / "manifest.json").write_text("{}")
+    return {"SABER_MODEL": "flashnext", "MODEL_PATH": str(pack),
+            "CTX_SIZE": "262144", "EXTRA_ARGS": "--fn-vision lazy"}
+
+
+def test_saber_flashnext_maps_tp2_pack_without_dflash2(tmp_path):
+    conf = _flashnext_conf(tmp_path)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="qwen-flashnext"))
+    assert argv == ["/bin/x", "--fn-vision", "lazy"]
+    assert env["SABER_MODEL"] == "flashnext"
+    assert env["PACK"] == conf["MODEL_PATH"]
+    assert env["SABER_NVME"] == str(tmp_path / "nvme")
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    assert env["MODEL"] == "qwen-flashnext"
+    assert env["MAX_CTX"] == "262144"
+    assert warns == []
+
+
+def test_saber_flashnext_requires_tp2_and_complete_pack(tmp_path):
+    conf = _flashnext_conf(tmp_path)
+    with pytest.raises(ValueError, match="two GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1"))
+    (tmp_path / "nvme" / "saber-packs" /
+     "qwen38-flashnext-quark-trunk8" / "rank1" / "trunk8.pack").unlink()
+    with pytest.raises(ValueError, match="rank1/trunk8.pack"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
