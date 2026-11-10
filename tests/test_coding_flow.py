@@ -357,11 +357,21 @@ def test_delegate_passes_isolated_worktree_to_spawn(tmp_path):
     assert "TASK:" in ctx.task
 
 
-def test_delegate_default_no_worktree(tmp_path):
+def test_delegate_default_shares_project_workspace(tmp_path):
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
     asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
-    assert ctx.kw["work_root_path"] is None
+    assert ctx.kw["work_root_path"] == str(repo)
+    assert {"memory.search", "kg.query", "kg.neighbors",
+            "graph.query", "graph.explain", "rag.search"} <= set(ctx.kw["tools"])
+
+
+def test_delegate_scratch_parent_shares_effective_workspace(tmp_path):
+    """Without a project root, the parent's scratch dir is its real workspace."""
+    ctx = _SpawnCapture(None)
+    ctx.tmp_root = str(tmp_path)
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
+    assert ctx.kw["work_root_path"] == str(tmp_path)
 
 
 def test_delegate_default_budget_is_coding_sized(tmp_path):

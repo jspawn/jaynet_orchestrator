@@ -343,6 +343,17 @@ class SpawnService:
         sampling = dict(sampling or {})
         router_controls = {k: sampling.pop(k) for k in
                            ("fallbacks", "disable_fallbacks") if k in sampling}
+        # Keep sandbox boundaries and store/container redirections across the
+        # child boundary. Without these, an eval child silently falls back to
+        # the live memory/RAG/project stores instead of its per-case sandbox.
+        child_run_overrides = {
+            k: self.run_overrides[k] for k in ("tools_patch", "config_patch")
+            if k in (self.run_overrides or {})}
+        if sampling or router_controls:
+            child_run_overrides.update({
+                "sampling": sampling, "sampling_force": True,
+                **({"router_controls": router_controls}
+                   if router_controls else {})})
         child = await self.runtime.run(
             task, share_private=child_share, tools=child_tools,
             disabled_tools=self.disabled_tools,
@@ -369,10 +380,7 @@ class SpawnService:
             # child even when it runs on a specialist alias — the whole
             # point is to override that preset's server-side defaults for
             # this kind of work (execution cold, ideation warm).
-            run_overrides=({"sampling": sampling, "sampling_force": True,
-                            **({"router_controls": router_controls}
-                               if router_controls else {})}
-                           if sampling or router_controls else None),
+            run_overrides=child_run_overrides or None,
             # Per-run vision override (specialist.delegate looks up the
             # target slot's caps.vision): None = inherit the brain flag.
             vision=vision,

@@ -296,6 +296,31 @@ def test_normal_child_completion_unaffected():
     assert seen_kw["depth"] == 1
 
 
+def test_spawn_inherits_store_and_sandbox_overrides(tmp_path):
+    """Children stay inside the parent's eval stores and container config."""
+    captured = {}
+
+    async def child(msg, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s", "budget": {}}
+
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps({"task": "t"})),
+                       _final()], child)
+    overrides = {
+        "tools_patch": {
+            "memory": {"db_path": str(tmp_path / "memory.db")},
+            "rag": {"db_path": str(tmp_path / "rag.db")},
+            "code": {"container": {"id": "eval-container"}},
+        },
+        "config_patch": {"web": {"projects_dir": str(tmp_path / "projects")}},
+    }
+    out = asyncio.run(rt.run("delegate", run_overrides=overrides))
+    assert out["status"] == "ok"
+    child_overrides = captured["run_overrides"]
+    assert child_overrides["tools_patch"] == overrides["tools_patch"]
+    assert child_overrides["config_patch"] == overrides["config_patch"]
+
+
 # ---- spawn tool-narrowing: a child never gets tools the parent didn't have ----
 
 def test_spawn_rejects_request_outside_parent_tools():

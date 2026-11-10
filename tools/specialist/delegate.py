@@ -129,6 +129,13 @@ async def _generation_probe(preset: dict, served_model: str,
         await asyncio.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
 
 
+# Read-only retrieval shared by specialist types. The parent still narrows
+# this set to its own allowed tools; private results retain their usual taint.
+_CONTEXT_TOOLS = [
+    "memory.search", "kg.query", "kg.neighbors",
+    "graph.query", "graph.explain", "rag.search",
+]
+
 # Sensible default tool-set for a coding child: navigate, edit, verify, checkpoint.
 _DEFAULT_CODING_TOOLS = [
     "fs.read", "fs.list", "fs.grep", "fs.write", "fs.edit",
@@ -137,6 +144,7 @@ _DEFAULT_CODING_TOOLS = [
     "git.status", "git.diff", "git.log", "git.show", "git.add", "git.commit",
     "git.branch", "git.stash", "git.restore", "git.worktree",
     "skill.load", "skill.list", "note.set", "context.pin", "llm.call",
+    *_CONTEXT_TOOLS,
 ]
 
 # Research children need the web lane, not the git lane. Live evidence: a
@@ -147,10 +155,10 @@ _DEFAULT_CODING_TOOLS = [
 # routes the MODEL; it must route the TOOLSET too.
 _DEFAULT_RESEARCH_TOOLS = [
     "web.search", "web.fetch", "web.request", "web.render", "browser.pdf",
-    "rag.search",
     "fs.read", "fs.list", "fs.grep", "fs.write",
     "code.run",
     "skill.load", "skill.list", "note.set", "context.pin",
+    *_CONTEXT_TOOLS,
 ]
 
 # Security and multi-step work are coding-first but routinely need a lookup
@@ -186,6 +194,7 @@ _READ_ONLY_TOOLS = frozenset({
     "fs.read", "fs.list", "fs.find", "fs.grep",
     "code.check", "llm.call",
     "web.search", "web.fetch", "web.request",
+    *_CONTEXT_TOOLS,
 })
 
 
@@ -981,6 +990,12 @@ class SpecialistDelegate(Tool):
         # brain first) before the parent's next turn — opt out with
         # models.swap_back: false. Runs even when the child raises; restore
         # failures surface in the result, never silently.
+        # A scratch-only parent has work_root=None; its tmp_root IS the visible
+        # workspace. Passing None here would give the child a fresh scratch dir
+        # and leave the parent unable to see the specialist's deliverables.
+        child_root = (run.wt["path"] if run.wt else
+                      (getattr(run.ctx, "work_root", None)
+                       or getattr(run.ctx, "tmp_root", None)))
         try:
             from runtime.tool_base import role_sampling
             # Optional spawn sampling is omitted when empty so older custom
@@ -1000,7 +1015,7 @@ class SpecialistDelegate(Tool):
                 **({"sampling": _rs} if _rs else {}),
                 **({"base_system": run.worker_base}
                    if run.worker_base else {}),
-                work_root_path=(run.wt["path"] if run.wt else None))
+                work_root_path=child_root)
         finally:
             if run.evicted and bool((run.ctx.config.get("models") or {}).get(
                     "swap_back", True)):

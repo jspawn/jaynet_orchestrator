@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.45.1 — 2026-11-10
+
+- **Flash-Next compatibility:** native Saber launches accept the checkpoint's
+  quantization metadata, raise the file-descriptor limit, merge strict-template
+  system directives, and normalize null tool-turn content. The live Occamy →
+  Flash-Next coding delegate → Occamy swap now completes and verifies work.
+- **Delegation continuity:** ordinary specialist children share the parent's
+  effective workspace, including scratch-only runs; explicit isolated worktrees
+  stay separate. Children inherit eval store/container redirects instead of
+  falling through to live memory, RAG or project stores.
+- **Specialist context:** coding and research delegates can use read-only memory,
+  KG, Graphify and RAG retrieval, narrowed by the parent's allowed tools.
+- **Verification:** 2,847 tests pass, plus the successful live GPU delegation
+  and brain-restoration check.
+
 ## 1.45.0 — 2026-11-10
 
 - **Managed Saber Flash-Next:** Qwen3.8 Flash-Next TP2 presets now launch
