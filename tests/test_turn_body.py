@@ -118,6 +118,10 @@ def test_system_first_merges_all_system_messages_at_index_zero():
         {"role": "user", "content": "work"},
         {"role": "assistant", "content": "working"},
         {"role": "system", "content": "guard"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "call-1", "type": "function",
+                         "function": {"name": "code.run", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "call-1"},
         {"role": "user", "content": "continue"},
     ]
     b = _turn_body("local-preset-flash", messages, TOOLS, None, True, False,
@@ -126,6 +130,10 @@ def test_system_first_merges_all_system_messages_at_index_zero():
         {"role": "system", "content": "base\n\ndate\n\nguard"},
         {"role": "user", "content": "work"},
         {"role": "assistant", "content": "working"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "call-1", "type": "function",
+                         "function": {"name": "code.run", "arguments": "{}"}}]},
+        {"role": "tool", "content": "", "tool_call_id": "call-1"},
         {"role": "user", "content": "continue"},
     ]
     assert _turn_body("local-orchestrator", messages, TOOLS, None, True,

@@ -145,10 +145,14 @@ def _system_first_for(config: dict, model: str | None) -> bool:
 
 
 def _system_first_messages(messages: list[dict]) -> list[dict]:
-    """One leading system message; retain system order and all other turns."""
+    """One leading system message and defined content on every turn."""
     system = "\n\n".join(str(m.get("content") or "") for m in messages
                          if m.get("role") == "system")
-    rest = [m for m in messages if m.get("role") != "system"]
+    # Flash-Next's template tests `content is iterable` before checking for
+    # none/undefined. Tool-only assistant turns therefore need an empty string,
+    # not the null content returned by the OpenAI streaming assembly.
+    rest = [{**m, "content": "" if m.get("content") is None else m["content"]}
+            for m in messages if m.get("role") != "system"]
     return ([{"role": "system", "content": system}] if system else []) + rest
 
 
