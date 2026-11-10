@@ -56,10 +56,12 @@ def test_clean_profile_roundtrip_and_coercions():
     p = _clean_profile({"think_strip": "QWEN3",
                         "reasoning_budget_tokens": "4096",
                         "sampling": {"temperature": 0.4},
-                        "role_temperature": {"coding": "0.2"}})
+                        "role_temperature": {"coding": "0.2"},
+                        "system_first": True})
     assert p["think_strip"] == "qwen3"
     assert p["reasoning_budget_tokens"] == 4096
     assert p["role_temperature"] == {"coding": 0.2}
+    assert p["system_first"] is True
     assert _clean_profile(None) == {} and _clean_profile({}) == {}
 
 
@@ -72,6 +74,8 @@ def test_clean_profile_rejects_bad_input():
         _clean_profile({"reasoning_budget_tokens": "lots"})
     with pytest.raises(ValueError, match="object"):
         _clean_profile({"compaction": "often"})
+    with pytest.raises(ValueError, match="system_first"):
+        _clean_profile({"system_first": "yes"})
     with pytest.raises(ValueError, match="object"):
         _clean_profile(["qwen3"])
 

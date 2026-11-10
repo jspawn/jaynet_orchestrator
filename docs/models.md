@@ -285,7 +285,10 @@ checkpoint with `tools/fetch_packs.sh flashnext`, then use
 `specialist-qwen3.8-flashnext-saber-tp2.conf`. Its `SABER_MODEL=flashnext`
 selects `scripts/saber-flashnext-native.sh`; no separate DFlash2 pack is
 needed. Keep the original checkpoint at the absolute path recorded in the
-pack manifest and PLE index. The managed Flash-Next path is native-only.
+pack manifest and PLE index. Set `profile.system_first: true`: its strict chat
+template accepts system text only at index 0, so JayNet merges all system
+directives there. The launcher raises its soft file-descriptor limit to 65536
+for the 131-shard checkpoint. The managed Flash-Next path is native-only.
 
 ## External embed / rerank endpoints
 

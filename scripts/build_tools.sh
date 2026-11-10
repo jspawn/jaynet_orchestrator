@@ -2550,10 +2550,11 @@ No weights were downloaded. Fetch exactly one TP layout (resumable):
   SABER_PACKS="\${ORCH_MODELS:-\$HOME/jaynet-models}/saber-packs" \\
     ${src_dir}/tools/fetch_packs.sh 27b       # two cards, about 26 GB
 
-Reference presets: specialist-qwen3.8-27b-saber-tp1.conf and -tp2.conf.
-TP=1 and TP=2 packs are not interchangeable. Flash-Next needs upstream's
-own launcher or an adopted remote preset in this pass. The container build
-remains available with SABER_BUILD=container scripts/build_tools.sh saber rocm.
+Reference presets: specialist-qwen3.8-27b-saber-tp1.conf, -tp2.conf and
+specialist-qwen3.8-flashnext-saber-tp2.conf. TP=1 and TP=2 packs are not
+interchangeable. Flash-Next is managed natively with its trunk8 TP2 pack.
+The 27B container build remains available with
+SABER_BUILD=container scripts/build_tools.sh saber rocm.
 EOF
     ok "Installed saber rocm (${mode}): $link/bin/saber (see ${dest}/NOTES.md)"
 }
@@ -2561,9 +2562,101 @@ EOF
 apply_saber_patches() {
     local dir="$1" mode="$2" file="$1/tools/serve_27b.sh"
     if [[ "$mode" == native ]]; then
+        # The hosted Flash-Next Quark checkpoint declares these fields/modules;
+        # the pinned parser predates them. Keep the fork's validated compatibility
+        # fixes idempotent until the pin advances past them.
+        cat > "${BASE_DIR}/patches/saber-quark-config.patch" <<'PATCH'
+diff --git a/crates/saber-model/src/qwen4_exp/config.rs b/crates/saber-model/src/qwen4_exp/config.rs
+index 85d34bf..e025f51 100644
+--- a/crates/saber-model/src/qwen4_exp/config.rs
++++ b/crates/saber-model/src/qwen4_exp/config.rs
+@@ -1028,11 +1028,22 @@ impl Qwen4ExpConfig {
+                     .ok_or_else(|| err(format!("quantization_config.exclude: non-string {x}")))
+             })
+             .collect::<Result<_, _>>()?;
+-        let known = self.linear_modules();
++        let mut known = self.linear_modules();
++        for l in self.ple.layer_indices() {
++            for shard in 0..self.ple.split_parts {
++                known.push(format!(
++                    "model.language_model.layers.{l}.ple.ple_embedding.ngram_embedding.shard_{shard}"
++                ));
++            }
++        }
++        known.extend([
++            "model.visual.patch_embed.proj".into(),
++            "model.visual.pos_embed".into(),
++        ]);
+         for e in &exclude {
+             if !known.iter().any(|k| k == e) {
+                 return Err(err(format!(
+-                    "quantization_config.exclude: `{e}` is not a linear module of this model"
++                    "quantization_config.exclude: `{e}` is not a linear or declared non-linear module of this model"
+                 )));
+             }
+         }
+@@ -1214,6 +1225,7 @@ fn mx_spec(mut s: Fields<'_>, dynamic: bool) -> Result<MxSpec, ModelError> {
+     s.expect("symmetric", &Value::Null)?;
+     s.expect("round_method", &Value::from("half_even"))?;
+     s.expect("scale_type", &Value::from("float"))?;
++    s.expect("zero_point_type", &Value::from("int32"))?;
+     s.expect("scale_format", &Value::from("e8m0"))?;
+     s.expect("scale_calculation_mode", &Value::from("even"))?;
+     s.expect("mx_element_dtype", &Value::Null)?;
+diff --git a/crates/saber-model/tests/data/qwen4_exp_quark.config.json b/crates/saber-model/tests/data/qwen4_exp_quark.config.json
+index b725ed7..9860c9a 100644
+--- a/crates/saber-model/tests/data/qwen4_exp_quark.config.json
++++ b/crates/saber-model/tests/data/qwen4_exp_quark.config.json
+@@ -163,6 +163,7 @@
+                 "symmetric": null,
+                 "round_method": "half_even",
+                 "scale_type": "float",
++                "zero_point_type": "int32",
+                 "scale_format": "e8m0",
+                 "scale_calculation_mode": "even",
+                 "mx_element_dtype": null,
+@@ -182,6 +182,7 @@
+                 "symmetric": null,
+                 "round_method": "half_even",
+                 "scale_type": "float",
++                "zero_point_type": "int32",
+                 "scale_format": "e8m0",
+                 "scale_calculation_mode": "even",
+                 "mx_element_dtype": null,
+diff --git a/crates/saber-model/tests/qwen4_exp_config.rs b/crates/saber-model/tests/qwen4_exp_config.rs
+index ec12c00..d16fa6d 100644
+--- a/crates/saber-model/tests/qwen4_exp_config.rs
++++ b/crates/saber-model/tests/qwen4_exp_config.rs
+@@ -170,6 +170,21 @@ fn prime_helper_matches_upstream_semantics() {
+     assert_eq!(nth_prime_after(19_999_999, 1), 20_000_003);
+ }
+
++#[test]
++fn quark_exclude_accepts_declared_nonlinear_modules() {
++    let mut v: Value = serde_json::from_str(QUARK).unwrap();
++    let exclude = v["quantization_config"]["exclude"].as_array_mut().unwrap();
++    for name in [
++        "model.language_model.layers.1.ple.ple_embedding.ngram_embedding.shard_0",
++        "model.language_model.layers.1.ple.ple_embedding.ngram_embedding.shard_127",
++        "model.visual.patch_embed.proj",
++        "model.visual.pos_embed",
++    ] {
++        exclude.push(Value::from(name));
++    }
++    parse(&v.to_string());
++}
++
+ // ---- negative controls: each doctored file is refused, and the refusal names the field -----
+
+ #[test]
+PATCH
+        _llama_patch_apply "$dir" saber-quark-config \
+            crates/saber-model/src/qwen4_exp/config.rs zero_point_type
         install -m 755 "$SCRIPT_DIR/saber-27b-native.sh" \
             "$dir/tools/serve_27b_native.sh"
-        ok "installed saber native launcher"
+        install -m 755 "$SCRIPT_DIR/saber-flashnext-native.sh" \
+            "$dir/tools/serve_flashnext_native.sh"
+        ok "installed saber native launchers + Quark config compatibility"
         return
     fi
     # Upstream hardcodes 0.0.0.0 and clap rejects a second --host. Let our

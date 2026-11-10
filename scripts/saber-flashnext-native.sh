@@ -125,6 +125,9 @@ CMD=(
   "${ARGS[@]}"
 )
 
+# JayNet's systemd soft limit is 1024; the checkpoint has 131 shards and the
+# expert tier opens many more files. The hard limit is 524288 on the live box.
+ulimit -n "${SABER_NOFILE:-65536}"
 ulimit -c 0
 echo "== starting native Flash-Next on :$PORT (TP=2, HIP_VISIBLE_DEVICES=$HIP_DEVICES)" >&2
 exec env \

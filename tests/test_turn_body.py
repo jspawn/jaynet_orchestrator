@@ -109,3 +109,24 @@ def test_reasoning_budget_local_only():
     b = _turn_body("tess", MSGS, TOOLS, None, True, False,
                    extra_local=frozenset({"tess"}), reasoning_budget=2048)
     assert b["reasoning_budget_tokens"] == 2048
+
+
+def test_system_first_merges_all_system_messages_at_index_zero():
+    messages = [
+        {"role": "system", "content": "base"},
+        {"role": "system", "content": "date"},
+        {"role": "user", "content": "work"},
+        {"role": "assistant", "content": "working"},
+        {"role": "system", "content": "guard"},
+        {"role": "user", "content": "continue"},
+    ]
+    b = _turn_body("local-preset-flash", messages, TOOLS, None, True, False,
+                   system_first=True)
+    assert b["messages"] == [
+        {"role": "system", "content": "base\n\ndate\n\nguard"},
+        {"role": "user", "content": "work"},
+        {"role": "assistant", "content": "working"},
+        {"role": "user", "content": "continue"},
+    ]
+    assert _turn_body("local-orchestrator", messages, TOOLS, None, True,
+                      False)["messages"] is messages

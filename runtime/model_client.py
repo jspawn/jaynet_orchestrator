@@ -138,11 +138,26 @@ def _is_local_model(model: str | None,
     return bool(model) and (model.startswith("local-") or model in extra_local)
 
 
+def _system_first_for(config: dict, model: str | None) -> bool:
+    """Strict templates (Saber Flash-Next) accept system text only at index 0."""
+    from runtime.preset_store import profile_for
+    return bool(profile_for(config, model).get("system_first"))
+
+
+def _system_first_messages(messages: list[dict]) -> list[dict]:
+    """One leading system message; retain system order and all other turns."""
+    system = "\n\n".join(str(m.get("content") or "") for m in messages
+                         if m.get("role") == "system")
+    rest = [m for m in messages if m.get("role") != "system"]
+    return ([{"role": "system", "content": system}] if system else []) + rest
+
+
 def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
                sampling: dict | None, think: bool, stream: bool,
                extra_local: frozenset = frozenset(),
                think_switch: frozenset | None = None,
-               reasoning_budget: int | None = None) -> dict:
+               reasoning_budget: int | None = None,
+               system_first: bool = False) -> dict:
     """Build the /v1/chat/completions body shared by both model-turn paths.
 
     `chat_template_kwargs` (the llama.cpp jinja thinking switch) is added ONLY for
@@ -158,10 +173,13 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     reject unknown params. Capping thinking makes overthinking VISIBLE content
     the loop guards can nudge, instead of invisible reasoning burning the whole
     completion cap (live: 2x8192 tokens, empty answer).
+
+    `system_first` is a per-preset compatibility mode for strict chat templates:
+    all system directives are merged at index 0 instead of rejected in place.
     """
     body: dict = {
         "model": model,
-        "messages": messages,
+        "messages": _system_first_messages(messages) if system_first else messages,
         "tools": tools_schema,
         "tool_choice": "auto",
         **_sampler_body(sampling),
@@ -406,7 +424,8 @@ class ModelClientMixin:
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=False, extra_local=self._local_aliases,
                           think_switch=self._think_aliases,
-                          reasoning_budget=self._reasoning_budget_for(model))
+                          reasoning_budget=self._reasoning_budget_for(model),
+                          system_first=_system_first_for(self.config, model))
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         delays = self._retry_delays_s()
@@ -617,7 +636,8 @@ class ModelClientMixin:
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=True, extra_local=self._local_aliases,
                           think_switch=self._think_aliases,
-                          reasoning_budget=self._reasoning_budget_for(model))
+                          reasoning_budget=self._reasoning_budget_for(model),
+                          system_first=_system_first_for(self.config, model))
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}

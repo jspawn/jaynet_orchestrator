@@ -96,7 +96,7 @@ CAP_KEYS = ("vision", "thinking")
 # hardcoded. Everything falls back to the global when unset, so an
 # unconfigured preset behaves exactly as before profiles existed.
 PROFILE_KEYS = ("think_strip", "reasoning_budget_tokens", "compaction",
-                "anchor", "sampling", "role_temperature")
+                "anchor", "sampling", "role_temperature", "system_first")
 # think_strip values: which chain-of-thought markup family the harness
 # strips/splits for this model — qwen3 <think>…</think>, gemma4 channel
 # frames, both (the historical default), none (pass through untouched).
@@ -256,6 +256,9 @@ def _clean_profile(v) -> dict:
                 raise ValueError("profile.role_temperature must be an object "
                                  'like {"coding": 0.2}')
             pv = {str(t): float(x) for t, x in pv.items()}
+        elif pk == "system_first":
+            if not isinstance(pv, bool):
+                raise ValueError("profile.system_first must be true or false")
         elif not isinstance(pv, dict):
             raise ValueError(f"profile.{pk} must be an object")
         out[pk] = pv
