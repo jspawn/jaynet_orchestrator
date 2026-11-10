@@ -53,6 +53,15 @@ def test_disable_fallbacks_is_an_explicit_router_control():
     assert "disable_fallbacks" not in b
 
 
+def test_request_scoped_fallback_chain_is_forwarded():
+    chain = [{"local-specialist": ["local-preset-coder", "local-preset-brain"]}]
+    b = _turn_body("local-specialist", MSGS, TOOLS,
+                   {"fallbacks": chain}, True, False)
+    assert b["fallbacks"] == chain
+    b = _turn_body("local-specialist", MSGS, TOOLS, None, True, False)
+    assert "fallbacks" not in b
+
+
 def test_extra_local_aliases_count_as_local():
     # serve.start'd models under a custom (non local-*) alias get the thinking
     # switch via the extra_local set (the local_concurrency keys by convention).

@@ -10,7 +10,16 @@ import sqlite3
 import pytest
 
 from runtime.model_client import ModelClientMixin, _strip_think, _think_tag_pairs, think_family_for
-from runtime.preset_store import PresetStore, _clean_profile, profile_for
+from runtime.preset_store import (
+    PresetStore,
+    _clean_profile,
+    alias_allowed,
+    preset_name_for_alias,
+    profile_for,
+    route_target,
+    think_switch_aliases,
+    vision_for_alias,
+)
 from runtime.run_setup import parse_run_settings
 from runtime.tool_base import role_sampling
 
@@ -211,6 +220,37 @@ def test_parse_settings_nondefault_model_gets_only_its_profile_sampling():
                 run_overrides={"sampling": {"temperature": 0.9},
                                "sampling_force": True})
     assert st.sampling["temperature"] == 0.9
+
+
+def test_router_controls_do_not_leak_from_untrusted_sampling():
+    injected = {"fallbacks": [{"local-specialist": ["local-orchestrator"]}],
+                "disable_fallbacks": True}
+    st = _parse(CFG, run_overrides={"sampling": injected})
+    assert "fallbacks" not in st.sampling
+    assert "disable_fallbacks" not in st.sampling
+    st = _parse(CFG, run_overrides={"router_controls": injected})
+    assert st.sampling["fallbacks"] == injected["fallbacks"]
+    assert st.sampling["disable_fallbacks"] is True
+
+
+def test_exact_alias_resolves_profile_capabilities_and_allowlist():
+    cfg = copy.deepcopy(CFG)
+    presets = cfg["models"]["presets"]
+    presets["spec-y"]["caps"] = {"vision": True}
+    presets["other"] = {"alias": "local-specialist", "backend": "vllm",
+                        "profile": {"think_strip": "gemma4"},
+                        "caps": {"vision": False, "thinking": False}}
+    assert route_target(presets, "spec-y") == "local-preset-spec-y"
+    assert preset_name_for_alias(cfg, "local-preset-spec-y") == "spec-y"
+    assert profile_for(cfg, "local-preset-spec-y")["sampling"] == {"temperature": 0.3}
+    assert vision_for_alias(cfg, "local-preset-spec-y") is True
+    assert vision_for_alias(cfg, "local-preset-other") is False
+    switches = think_switch_aliases(cfg, ())
+    assert "local-preset-spec-y" in switches
+    assert "local-preset-other" not in switches
+    cfg["models"]["allowed_presets"] = ["spec-y"]
+    assert alias_allowed(cfg, "local-preset-spec-y") is True
+    assert alias_allowed(cfg, "local-preset-other") is False
 
 
 # ---- model-aware role sampling ----

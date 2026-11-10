@@ -271,6 +271,10 @@ def profile_for(config: dict, alias: str | None) -> dict:
     if not alias:
         return {}
     presets = ((config or {}).get("models") or {}).get("presets") or {}
+    if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
+        p = presets.get(str(alias)[len(INTERNAL_ALIAS_PREFIX):]) or {}
+        prof = p.get("profile")
+        return prof if isinstance(prof, dict) else {}
     for p in presets.values():
         if isinstance(p, dict) and p.get("alias") == alias:
             prof = p.get("profile")
@@ -328,6 +332,21 @@ SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("specialist2", "local-specialist2"),
                 ("specialist3", "local-specialist3"),
                 ("vision", "local-vision"))
+INTERNAL_ALIAS_PREFIX = "local-preset-"
+
+
+def internal_preset_alias(name: str) -> str:
+    """Exact-preset proxy model group, safe for primary and fallback targets."""
+    return INTERNAL_ALIAS_PREFIX + name
+
+
+def route_target(presets: dict, name: str) -> str:
+    """Public alias when unambiguous; exact-preset group when it is shared."""
+    p = presets.get(name) or {}
+    alias = str(p.get("alias") or "")
+    if alias and sum(q.get("alias") == alias for q in presets.values()) == 1:
+        return alias
+    return internal_preset_alias(name)
 
 
 def preset_name_for_alias(config: dict, alias: str | None) -> str:
@@ -338,10 +357,13 @@ def preset_name_for_alias(config: dict, alias: str | None) -> str:
     """
     if not alias:
         return ""
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
+        name = str(alias)[len(INTERNAL_ALIAS_PREFIX):]
+        return name if name in presets else ""
     slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
     if slot:
         return slot_preset_name(config, slot)
-    presets = ((config or {}).get("models") or {}).get("presets") or {}
     matches = [name for name, preset in presets.items()
                if isinstance(preset, dict) and preset.get("alias") == alias]
     return matches[0] if len(matches) == 1 else ""
@@ -385,7 +407,10 @@ def brain_overlay_for(config: dict, alias: str | None) -> dict:
         return empty
     presets = ((config or {}).get("models") or {}).get("presets") or {}
     slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
-    if slot:
+    if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
+        name = str(alias)[len(INTERNAL_ALIAS_PREFIX):]
+        preset = presets.get(name) or {}
+    elif slot:
         name = slot_preset_name(config, slot)
         preset = presets.get(name) or {}
     else:
@@ -408,11 +433,13 @@ def context_for_alias(config: dict, alias: str | None) -> int:
     Custom aliases are safe only when exactly one preset carries them."""
     if not alias:
         return 0
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
     slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
-    if slot:
+    if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
+        preset = presets.get(str(alias)[len(INTERNAL_ALIAS_PREFIX):]) or {}
+    elif slot:
         preset = resolve_slot(config, slot)
     else:
-        presets = ((config or {}).get("models") or {}).get("presets") or {}
         matches = [p for p in presets.values()
                    if isinstance(p, dict) and p.get("alias") == alias]
         preset = matches[0] if len(matches) == 1 else {}
@@ -436,6 +463,10 @@ def vision_for_alias(config: dict, alias: str | None) -> bool:
     unknowns are False here; the brain's own flag lives in loop.py."""
     if not alias:
         return False
+    if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
+        presets = ((config or {}).get("models") or {}).get("presets") or {}
+        p = presets.get(str(alias)[len(INTERNAL_ALIAS_PREFIX):]) or {}
+        return bool((p.get("caps") or {}).get("vision"))
     slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
     if slot is None:
         return False
@@ -455,6 +486,15 @@ def think_switch_aliases(config: dict, base_aliases) -> frozenset:
     for slot, alias in SLOT_ALIASES:
         p = resolve_slot(config, slot) or brain_p
         think_cap = (p.get("caps") or {}).get("thinking")
+        if think_cap is True or (think_cap is None
+                                 and (p.get("backend") or "llama") == "llama"):
+            ok.add(alias)
+        else:
+            ok.discard(alias)
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    for name, p in presets.items():
+        think_cap = (p.get("caps") or {}).get("thinking")
+        alias = internal_preset_alias(name)
         if think_cap is True or (think_cap is None
                                  and (p.get("backend") or "llama") == "llama"):
             ok.add(alias)
@@ -672,11 +712,33 @@ class PresetStore:
             "profile": json.loads(r["profile"] or "{}"),
         }
 
+    @staticmethod
+    def _apply_order(rows: list[sqlite3.Row], raw: str | None) -> list[sqlite3.Row]:
+        try:
+            order = json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            order = []
+        if not isinstance(order, list):
+            order = []
+        by_name = {r["name"]: r for r in rows}
+        ordered, seen = [], set()
+        for name in order:
+            if isinstance(name, str) and name in by_name and name not in seen:
+                ordered.append(by_name[name])
+                seen.add(name)
+        ordered.extend(r for r in rows if r["name"] not in seen)
+        return ordered
+
+    def _rows_in_order(self, c: sqlite3.Connection) -> list[sqlite3.Row]:
+        rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
+        r = c.execute("SELECT value FROM meta WHERE key='preset_order'").fetchone()
+        return self._apply_order(rows, r["value"] if r else None)
+
     def load(self) -> tuple[dict, dict]:
         """(presets in runtime.yaml shape, slots). Materializes conf files."""
         self.ensure()
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
+            rows = self._rows_in_order(c)
             slots = {r["slot"]: r["preset"]
                      for r in c.execute("SELECT * FROM slots ORDER BY rowid")}
             overlay_rows = c.execute(
@@ -712,7 +774,7 @@ class PresetStore:
     def list_full(self) -> tuple[list[dict], dict]:
         self.ensure()
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
+            rows = self._rows_in_order(c)
             slots = {r["slot"]: r["preset"]
                      for r in c.execute("SELECT * FROM slots ORDER BY rowid")}
         out = []
@@ -724,6 +786,32 @@ class PresetStore:
         return out, slots
 
     # ---- write ------------------------------------------------------------
+    def set_order(self, names: list) -> None:
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise ValueError("preset order must be a list of preset names")
+        self.ensure()
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            current = [r["name"] for r in
+                       c.execute("SELECT name FROM presets ORDER BY rowid")]
+            current_set = set(current)
+            name_set = set(names)
+            duplicates = sorted({n for n in names if names.count(n) > 1})
+            unknown = [n for n in names if n not in current_set]
+            omitted = [n for n in current if n not in name_set]
+            if duplicates or unknown or omitted:
+                details = []
+                if duplicates:
+                    details.append("duplicates: " + ", ".join(duplicates))
+                if unknown:
+                    details.append("unknown: " + ", ".join(unknown))
+                if omitted:
+                    details.append("omitted: " + ", ".join(omitted))
+                raise ValueError("preset order must contain every current preset "
+                                 "exactly once (" + "; ".join(details) + ")")
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('preset_order',?)",
+                      (json.dumps(names),))
+
     @staticmethod
     def _clean(fields: dict) -> dict:
         out = {}

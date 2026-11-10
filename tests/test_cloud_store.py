@@ -71,6 +71,8 @@ def test_replace_all_validation(tmp_path):
     with pytest.raises(ValueError):
         s.replace_all([_row(alias="local-orchestrator")])      # reserved
     with pytest.raises(ValueError):
+        s.replace_all([_row(alias="local-preset-brain")])      # internal namespace
+    with pytest.raises(ValueError):
         s.replace_all([_row(provider_model="")])
     with pytest.raises(ValueError):
         s.replace_all([_row(key_env="9BAD")])
@@ -123,8 +125,10 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     s.replace_all([_row(fallbacks=["qwen-plus", "local-orchestrator"]),
                    _row(name="off", alias="off-1", enabled=False)])
     cfg = {"models": {"presets": {
-               "brain": {"served_id": "brain-id", "port": 8090},
-               "fable": {"served_id": "fable-id", "port": 8080}},
+               "brain": {"served_id": "brain-id", "port": 8090,
+                         "alias": "local-orchestrator"},
+               "fable": {"served_id": "fable-id", "port": 8080,
+                         "alias": "local-specialist"}},
            "slots": {"brain": "brain", "specialist": "fable"}}}
     doc = yaml.safe_load(cs.render(cfg))
     by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
@@ -134,12 +138,48 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     # enabled cloud row rendered; disabled excluded
     assert by_name["nova-1"]["api_key"] == "os.environ/NOVA_API_KEY"
     assert "off-1" not in by_name
-    # fallbacks: filtered to existing aliases, local-specialist always covered
+    # Exact-preset deployments back request-scoped priority failover.
+    assert by_name["local-preset-brain"]["model"] == "openai/brain-id"
+    assert by_name["local-preset-fable"]["api_base"] == "http://127.0.0.1:8080/v1"
+    # Cloud fallbacks remain; the old static local-specialist chain is gone.
     fb = {k: v for entry in doc["router_settings"]["fallbacks"]
           for k, v in entry.items()}
     assert fb["nova-1"] == ["local-orchestrator"]   # qwen-plus not in catalog
-    assert fb["local-specialist"] == ["local-orchestrator"]
+    assert "local-specialist" not in fb
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
+
+
+def test_exact_primary_target_uses_its_own_rendered_endpoint(tmp_path, monkeypatch):
+    from runtime.preset_store import route_target
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
+    presets = {
+        "brain": {"served_id": "brain-id", "port": 8090,
+                  "alias": "local-orchestrator"},
+        "turbo": {"served_id": "turbo-id", "port": 8080,
+                  "alias": "local-specialist"},
+        "saber": {"served_id": "saber-id", "port": 8082,
+                  "alias": "local-specialist"},
+    }
+    cfg = {"models": {"presets": presets,
+                      "slots": {"brain": "brain", "specialist": "turbo",
+                                "specialist2": "saber"}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert route_target(presets, "saber") == "local-preset-saber"
+    assert by_name["local-specialist"]["api_base"] == "http://127.0.0.1:8080/v1"
+    assert by_name["local-preset-saber"]["api_base"] == "http://127.0.0.1:8082/v1"
+
+
+def test_render_refuses_duplicate_internal_model_group(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setattr(cs.CloudStore, "list",
+                        lambda self: [_row(alias="local-preset-brain")])
+    cfg = {"models": {"presets": {
+        "brain": {"served_id": "brain-id", "port": 8090,
+                  "alias": "local-orchestrator"}},
+        "slots": {"brain": "brain"}}}
+    with pytest.raises(ValueError, match="duplicate LiteLLM model group"):
+        cs.render(cfg)
 
 
 def test_render_merges_seed_extra_params(tmp_path, monkeypatch):

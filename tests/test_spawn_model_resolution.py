@@ -108,6 +108,25 @@ def test_spawn_strength_routes_to_tagged_live_slot(monkeypatch):
     assert r.result["routed"] == "strength 'coding' → local-specialist"
 
 
+def test_spawn_strength_attaches_priority_fallback_chain(monkeypatch):
+    _patch_live_slot(monkeypatch, {
+        "specialist": {"preset": "saber", "serving": "saber",
+                       "strengths": ["coding"], "alias": "local-specialist"},
+        "specialist2": {"preset": "turbo", "serving": "turbo",
+                        "strengths": ["coding"], "alias": "local-specialist2"}})
+    spawned = []
+    presets = {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }
+    r = asyncio.run(AgentSpawn().execute(
+        {"task": "t", "strength": "coding"}, _strength_ctx(spawned, presets)))
+    assert r.status == "ok", r.error
+    assert spawned[0]["model"] == "local-preset-saber"
+    assert spawned[0]["sampling"] == {
+        "fallbacks": [{"local-preset-saber": ["local-preset-turbo"]}]}
+
+
 def test_spawn_explicit_model_wins_over_strength(monkeypatch):
     _patch_live_slot(monkeypatch, {
         "specialist": {"preset": "coder", "serving": "qwen27b",

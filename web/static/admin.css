@@ -40,6 +40,12 @@
   .pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--border)}
   .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--err);border-color:var(--err)}
   .pill.bad{color:var(--err);border-color:var(--err)}
+  .preset-priority-cell{white-space:nowrap;width:70px;font-variant-numeric:tabular-nums}
+  .preset-drag-handle{display:inline-block;margin-right:8px;color:var(--muted);cursor:grab;user-select:none}
+  .preset-row.dragging{opacity:.4}
+  .preset-drop-before{box-shadow:inset 0 2px 0 var(--accent)}
+  .preset-drop-after{box-shadow:inset 0 -2px 0 var(--accent)}
+  .pill.preset-fallback{color:var(--warn);border-color:var(--warn);font-size:9px;padding:1px 5px}
   /* status pills carry a state dot (same dot language as the chat timeline) */
   .pill.st::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
     margin-right:5px;vertical-align:1px;background:currentColor}

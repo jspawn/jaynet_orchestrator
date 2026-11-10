@@ -132,9 +132,32 @@ class AgentFanout(Tool):
                                         f"{', '.join(valid_model_names(ctx.config))}")
             model = resolved
         strength = (args.get("strength") or "").strip()
+        fallbacks = []
         if model is None and strength:
-            from tools.model.catalog import route_strength
+            from runtime.preset_store import slot_preset_name
+            from tools.model.catalog import (
+                live_slot,
+                live_strength_fallbacks,
+                preferred_brain,
+                route_strength,
+                strength_plans,
+            )
             model = await route_strength(ctx.config, strength)
+            plan = next((p for p in await strength_plans(ctx.config, strength)
+                         if p.get("mode") != "swap"
+                         and p.get("alias") == model), None)
+            if plan:
+                model = plan["target"]
+            if model:
+                fallbacks = await live_strength_fallbacks(
+                    ctx.config, strength, model,
+                    primary_preset=(plan or {}).get("preset", ""))
+            else:
+                brain = preferred_brain(ctx.config)
+                live = await live_slot(ctx.config, slot="brain")
+                if brain and live and live.get("preset") == brain["preset"] \
+                        and slot_preset_name(ctx.config, "brain") == brain["preset"]:
+                    model = "local-orchestrator"
             if model is None:
                 return ToolResult(status="error", result=None,
                                   tool_name=self.name,
@@ -153,6 +176,8 @@ class AgentFanout(Tool):
                     model=model,
                     name=entry["name"],
                     budget=args.get("budget"),
+                    **({"sampling": {"fallbacks": [{model: fallbacks}]}}
+                       if model and fallbacks else {}),
                 )
             except Exception as e:
                 entry.update(status="error",

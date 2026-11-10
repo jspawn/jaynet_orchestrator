@@ -130,8 +130,8 @@ router_settings:
     - glm-5.2:       ["qwen-plus", "local-orchestrator"]
     - gemini-pro:    ["qwen-plus", "local-orchestrator"]
     - qwen-plus:     ["local-orchestrator"]
-    # If the local specialist is down, degrade to the brain.
-    - local-specialist:   ["local-orchestrator"]
+    # Local strength fallback chains come from the admin preset priority list
+    # and are attached per request after verifying which presets are live.
 
 litellm_settings:
   # Response cache for CLOUD aliases only — local aliases opt out per-model

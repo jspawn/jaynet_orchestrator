@@ -202,6 +202,42 @@ def test_ctx_spawn_threads_sampling_into_child_run():
                                          "sampling_force": True}
 
 
+def test_ctx_spawn_threads_fallbacks_into_trusted_router_controls():
+    captured = {}
+
+    async def child(msg, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s", "budget": {}}
+
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps(
+        {"task": "t", "strength": "coding"})), _final("wrapped")], child)
+    rt._local_aliases = frozenset({"coder-alias"})
+    import tools.model.catalog as catalog
+    orig_route = catalog.route_strength
+    orig_fallbacks = catalog.live_strength_fallbacks
+
+    async def fake_route(config, tag):
+        return "coder-alias"
+
+    async def fake_fallbacks(config, tag, primary, primary_preset=""):
+        return ["local-preset-coder-2"]
+
+    catalog.route_strength = fake_route
+    catalog.live_strength_fallbacks = fake_fallbacks
+    rt.config = dict(CFG, agent={"role_temperature": {"coding": 0.2}},
+                     confirmation={"confirm_cloud_calls": False})
+    try:
+        out = asyncio.run(rt.run("delegate this"))
+    finally:
+        catalog.route_strength = orig_route
+        catalog.live_strength_fallbacks = orig_fallbacks
+    assert out["status"] == "ok"
+    assert captured["run_overrides"] == {
+        "sampling": {"temperature": 0.2}, "sampling_force": True,
+        "router_controls": {"fallbacks": [
+            {"coder-alias": ["local-preset-coder-2"]}]}}
+
+
 def test_ctx_spawn_without_sampling_sends_no_overrides():
     captured = {}
 

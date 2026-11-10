@@ -26,6 +26,7 @@ from __future__ import annotations
 import time
 
 from runtime import serving as S
+from runtime.preset_store import internal_preset_alias, route_target
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.serve.lifecycle import S_slug, ServeStart, _cfg, _state_dir
 
@@ -49,8 +50,20 @@ def strength_registry(config: dict) -> dict:
     return {str(k): str(v) for k, v in raw.items() if str(k).strip() and v}
 
 
-# Specialist slots probed, in priority order, when routing by strength.
+# Specialist slots probed when routing by strength. Catalog order, not this
+# tuple, decides priority; the slots only tell us which presets are live.
 _ROUTING_SLOTS = ("specialist", "specialist2", "specialist3")
+
+
+def preferred_brain(config: dict) -> dict:
+    """First allowed, active brain preset in catalog priority order."""
+    from runtime.preset_store import preset_allowed
+    presets = ((config.get("models") or {}).get("presets") or {})
+    for name, p in presets.items():
+        if p.get("alias") == "local-orchestrator" and not p.get("archived") \
+                and preset_allowed(config, name):
+            return {"preset": name, "alias": "local-orchestrator"}
+    return {}
 
 
 def tagged_presets(config: dict, wanted: str) -> list[dict]:
@@ -76,65 +89,180 @@ def _route_slot_allowed(config: dict, slot: dict | None) -> bool:
                 and preset_allowed(config, str(slot.get("preset") or "")))
 
 
-async def route_strength(config: dict, wanted: str) -> str | None:
-    """Alias of a LIVE specialist slot whose preset advertises the wanted
-    strength tag — the harness's model-priority rule: work goes to the model
-    strong at it, not the default brain. An exact strength tag beats an
-    'allround' catch-all; an earlier slot wins ties. None when nothing
-    matching is live (callers fall back honestly)."""
-    allround = None
+async def _live_routes(config: dict) -> list[dict]:
+    """Live specialist presets, deduplicated and sorted by catalog priority."""
+    presets = ((config.get("models") or {}).get("presets") or {})
+    rank = {name: i for i, name in enumerate(presets)}
+    found: dict[str, dict] = {}
     for slot_name in _ROUTING_SLOTS:
         try:
             slot = await live_slot(config, slot=slot_name)
         except Exception:
             slot = None
-        if not slot or not _route_slot_allowed(config, slot):
+        if not slot or not slot.get("alias"):
             continue
-        strengths = slot.get("strengths") or []
-        if wanted in strengths:
-            return slot["alias"]
-        if "allround" in strengths and allround is None:
-            allround = slot["alias"]
-    return allround
+        name = str(slot.get("preset") or "")
+        if not name:
+            # Legacy/custom probes may omit identity. Prefer the assigned slot
+            # preset, then the first catalog holder of the reported alias.
+            assigned = str(((config.get("models") or {})
+                            .get("slots") or {}).get(slot_name) or "")
+            matches = [n for n, p in presets.items()
+                       if p.get("alias") == slot.get("alias")]
+            name = assigned if assigned in matches else (matches[0] if matches else "")
+            slot = {**slot, "preset": name}
+        if not _route_slot_allowed(config, slot):
+            continue
+        p = presets.get(name) or {}
+        if p.get("archived") or p.get("alias") == "local-orchestrator":
+            continue
+        found.setdefault(name, slot)
+    return sorted(found.values(), key=lambda s: rank.get(s.get("preset"), len(rank)))
 
 
-async def route_strength_exact(config: dict, wanted: str) -> str | None:
-    """Alias of a LIVE specialist slot whose preset carries exactly `wanted`
-    — no 'allround' fallback. strength_route decides when the fallback
-    applies; this is the post-swap confirmation probe."""
-    for slot_name in _ROUTING_SLOTS:
-        try:
-            slot = await live_slot(config, slot=slot_name)
-        except Exception:
-            slot = None
-        if slot and _route_slot_allowed(config, slot) \
-                and wanted in (slot.get("strengths") or []):
-            return slot["alias"]
+async def route_strength(config: dict, wanted: str) -> str | None:
+    """Highest-priority LIVE exact strength holder, then allround holder."""
+    routes = await _live_routes(config)
+    for route in routes:
+        if wanted in (route.get("strengths") or []):
+            return route["alias"]
+    for route in routes:
+        if "allround" in (route.get("strengths") or []):
+            return route["alias"]
     return None
 
 
-async def strength_route(config: dict, wanted: str) -> dict:
-    """The full routing plan for strength-tagged work: {"mode", "alias",
-    "preset"?} or {} when nothing routes at all. Modes: 'live' (an exact
-    tag holder is serving), 'swap' (a LOCAL preset carries the tag but is
-    stopped — the caller swaps it onto its slot via model.use rather than
-    settling for a weaker model), 'allround' (no preset carries the tag;
-    the allround specialist takes it). Remote presets are never swap
-    candidates — JayNet doesn't launch off-box servers."""
-    exact = await route_strength_exact(config, wanted)
-    if exact:
-        return {"mode": "live", "alias": exact}
+async def route_strength_exact(config: dict, wanted: str) -> str | None:
+    """Highest-priority live exact holder; no allround fallback."""
+    for route in await _live_routes(config):
+        if wanted in (route.get("strengths") or []):
+            return route["alias"]
+    return None
+
+
+async def strength_plans(config: dict, wanted: str) -> list[dict]:
+    """Ordered routing attempts: exact-tag presets, then allround presets.
+
+    A stopped higher-priority local preset deliberately precedes a live lower
+    one. Remote presets participate only when already live. Brains are excluded;
+    the preferred brain is the delegate's separate final fallback.
+    """
+    from runtime.preset_store import preset_allowed
     presets = ((config.get("models") or {}).get("presets") or {})
-    for t in tagged_presets(config, wanted):
-        if wanted not in (t.get("strengths") or []) or not t.get("alias"):
-            continue
-        p = presets.get(t["preset"]) or {}
-        if not (p.get("remote_host") or "").strip():
-            return {"mode": "swap", "alias": t["alias"], "preset": t["preset"]}
-    allround = await route_strength(config, wanted)
-    if allround:
-        return {"mode": "allround", "alias": allround}
-    return {}
+    live = {r.get("preset"): r for r in await _live_routes(config)}
+    # Live probes are authoritative about the serving model's tags (and may be
+    # legacy/custom entries absent from the catalog). Unknown live names append
+    # after priority-ranked catalog entries and are never hot-loaded.
+    names = list(presets) + [n for n in live if n not in presets]
+    plans = []
+    for exact in (True, False):
+        for name in names:
+            p = presets.get(name) or {}
+            current = live.get(name)
+            if p.get("archived") or not preset_allowed(config, name):
+                continue
+            alias = (current or {}).get("alias") or p.get("alias")
+            if not alias or p.get("alias") == "local-orchestrator":
+                continue
+            strengths = ((current or {}).get("strengths")
+                         if current else p.get("strengths")) or []
+            if (wanted in strengths) != exact:
+                continue
+            if not exact and "allround" not in strengths:
+                continue
+            target = route_target(presets, name) if name in presets else alias
+            if current:
+                plans.append({"mode": "live" if exact else "allround",
+                              "alias": alias, "target": target, "preset": name})
+            elif name in presets and not (p.get("remote_host") or "").strip():
+                plans.append({"mode": "swap", "alias": alias, "target": target,
+                              "preset": name,
+                              **({"allround": True} if not exact else {})})
+    return plans
+
+
+async def strength_route(config: dict, wanted: str) -> dict:
+    """First plan from strength_plans, preserving the historical public shape."""
+    plans = await strength_plans(config, wanted)
+    if not plans:
+        # Historical extension seam: custom live-only routers can still supply
+        # an allround alias when no catalog candidate exists.
+        alias = await route_strength(config, wanted)
+        return {"mode": "allround", "alias": alias} if alias else {}
+    plan = plans[0]
+    if plan.get("mode") == "swap":
+        return {k: v for k, v in plan.items()
+                if k != "target" and (k != "allround" or v)}
+    return {"mode": plan["mode"], "alias": plan["alias"]}
+
+
+def _payload_compatible(primary: dict, candidate: dict) -> bool:
+    """Can a request body/response parser built for primary safely serve on
+    candidate? Cross-family failover needs target-aware payloads, which the
+    proxy cannot provide — restrict it to the same compatibility group."""
+    if not primary or not candidate:
+        return False
+    p_backend = primary.get("backend") or "llama"
+    c_backend = candidate.get("backend") or "llama"
+    if p_backend != c_backend:
+        return False
+    p_think = (primary.get("caps") or {}).get("thinking")
+    c_think = (candidate.get("caps") or {}).get("thinking")
+    p_switch = p_think is True or (p_think is None and p_backend == "llama")
+    c_switch = c_think is True or (c_think is None and c_backend == "llama")
+    if p_switch != c_switch:
+        return False
+    if (primary.get("caps") or {}).get("vision") \
+            and not (candidate.get("caps") or {}).get("vision"):
+        return False
+    p_family = str((primary.get("profile") or {}).get("think_strip") or "both")
+    c_family = str((candidate.get("profile") or {}).get("think_strip") or "both")
+    return p_family == c_family
+
+
+async def live_strength_fallbacks(config: dict, wanted: str, primary: str,
+                                  primary_preset: str = "",
+                                  exclude_presets=()) -> list[str]:
+    """Verified-live, payload-compatible candidates for LiteLLM failover.
+
+    Internal aliases name exact preset deployments. Identity probing matters:
+    alternatives can share one port, so a stopped preset must never become a
+    fallback merely because another model is listening on its endpoint.
+    """
+    presets = ((config.get("models") or {}).get("presets") or {})
+    routes = await _live_routes(config)
+    primary_name = primary_preset or next(
+        (name for name in presets if internal_preset_alias(name) == primary), "")
+    primary_name = primary_name or next(
+        (str(r.get("preset") or "") for r in routes if r.get("alias") == primary), "")
+    if primary == "local-orchestrator" and not primary_name:
+        primary_name = str(preferred_brain(config).get("preset") or "")
+    primary_cfg = presets.get(primary_name) or {}
+    if not primary_cfg:
+        return []
+    excluded = set(exclude_presets) | {primary_name}
+    ordered = [r for r in routes if wanted in (r.get("strengths") or [])]
+    ordered += [r for r in routes if "allround" in (r.get("strengths") or [])
+                and r not in ordered]
+    out = []
+    for route in ordered:
+        name = str(route.get("preset") or "")
+        if name in presets and name not in excluded \
+                and _payload_compatible(primary_cfg, presets[name]):
+            out.append(internal_preset_alias(name))
+            excluded.add(name)
+    brain = preferred_brain(config)
+    brain_name = str(brain.get("preset") or "")
+    if brain_name and brain_name not in excluded:
+        try:
+            live = await live_slot(config, slot="brain")
+        except Exception:
+            live = None
+        if live and live.get("preset") == brain_name \
+                and _route_slot_allowed(config, live) \
+                and _payload_compatible(primary_cfg, presets.get(brain_name) or {}):
+            out.append(internal_preset_alias(brain_name))
+    return list(dict.fromkeys(out))
 
 
 def invalidate_live_slots() -> None:

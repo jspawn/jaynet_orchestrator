@@ -66,3 +66,25 @@ def test_model_use_and_llm_call_refuse_disallowed_models_without_io():
         "local-specialist", "task", None, None, False, None, ctx))
     assert result.status == "error"
     assert "allowed_presets" in result.error
+
+
+def test_request_fallback_chain_respects_allowlist(monkeypatch):
+    cfg = copy.deepcopy(CFG)
+    cfg["models"]["presets"]["turbo"] = {
+        "alias": "local-specialist", "port": 8082, "strengths": ["coding"]}
+    cfg["models"]["allowed_presets"] = ["coder", "brain"]
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return {
+            "specialist": {"preset": "coder", "alias": "local-specialist",
+                           "serving": "coder", "strengths": ["coding"]},
+            "specialist2": {"preset": "turbo", "alias": "local-specialist2",
+                            "serving": "turbo", "strengths": ["coding"]},
+            "brain": {"preset": "brain", "alias": "local-orchestrator",
+                      "serving": "brain", "strengths": ["reasoning"]},
+        }.get(slot)
+
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+    chain = asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-specialist"))
+    assert chain == ["local-preset-brain"]       # disallowed turbo is absent

@@ -306,6 +306,16 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
         eff_sampling = dict(_prof_sampling)
     else:
         eff_sampling = None
+    # LiteLLM fallback controls are trusted harness state, not sampler input.
+    # Drop them from config/profile/request sampling, then add only the separate
+    # internal channel populated by SpawnService. This keeps allowed_presets
+    # effective against client-supplied fallback aliases.
+    router_controls = _ro.get("router_controls") or {}
+    if eff_sampling:
+        eff_sampling = {k: v for k, v in eff_sampling.items()
+                        if k not in ("fallbacks", "disable_fallbacks")}
+    if router_controls:
+        eff_sampling = {**(eff_sampling or {}), **router_controls}
     _pt_cfg = config.get("parallel_tools")
     _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
     eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}

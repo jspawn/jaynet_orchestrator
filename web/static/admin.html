@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/admin.css?v=3">
+<link rel="stylesheet" href="/static/admin.css?v=4">
 
 </head>
 <body>
@@ -193,8 +193,10 @@
       VRAM fits. To run without a specialist, set its device to CPU or stop it in
       <b>Models → Servers</b>. A <b>remote</b> preset adopts a server that is already running —
       llama-server, vLLM or Ollama on another box, or a reverse-proxied URL.
-      JayNet treats it as local (slots, boot, model.use) but never launches or stops it.</p>
-    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+      JayNet treats it as local (slots, boot, model.use) but never launches or stops it.<br>
+      Drag rows to set <b>priority</b> (1 = first): strength routing and failover try presets in this order.
+      Changes save automatically. <b>Boot model slots stay independent</b>; archived and helper presets remain reorderable.</p>
+    <table><thead><tr><th>Priority</th><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
@@ -1151,7 +1153,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=21"></script>
+<script src="/static/admin.js?v=22"></script>
 
 </body>
 </html>

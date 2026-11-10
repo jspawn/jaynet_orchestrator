@@ -165,9 +165,34 @@ class AgentSpawn(Tool):
         # for whatever LIVE specialist carries the tag — the brain names the
         # capability, the harness tracks which model currently provides it.
         strength = (args.get("strength") or "").strip()
+        fallbacks = []
         if model is None and strength:
-            from tools.model.catalog import route_strength, strength_registry, tagged_presets
+            from runtime.preset_store import slot_preset_name
+            from tools.model.catalog import (
+                live_slot,
+                live_strength_fallbacks,
+                preferred_brain,
+                route_strength,
+                strength_plans,
+                strength_registry,
+                tagged_presets,
+            )
             model = await route_strength(ctx.config, strength)
+            plan = next((p for p in await strength_plans(ctx.config, strength)
+                         if p.get("mode") != "swap"
+                         and p.get("alias") == model), None)
+            if plan:
+                model = plan["target"]
+            if model:
+                fallbacks = await live_strength_fallbacks(
+                    ctx.config, strength, model,
+                    primary_preset=(plan or {}).get("preset", ""))
+            else:
+                brain = preferred_brain(ctx.config)
+                live = await live_slot(ctx.config, slot="brain")
+                if brain and live and live.get("preset") == brain["preset"] \
+                        and slot_preset_name(ctx.config, "brain") == brain["preset"]:
+                    model = "local-orchestrator"
             if model is None:
                 tagged = tagged_presets(ctx.config, strength)
                 if tagged:
@@ -190,7 +215,9 @@ class AgentSpawn(Tool):
         # signatures must keep working when no role temperature applies.
         # §4b: the child's own preset profile.role_temperature wins for the
         # tags it pins (model-aware lookup, global table as fallback).
-        _rs = role_sampling(ctx.config, strength, model=model)
+        _rs = dict(role_sampling(ctx.config, strength, model=model) or {})
+        if model and fallbacks:
+            _rs["fallbacks"] = [{model: fallbacks}]
         child = await ctx.spawn(
             task,
             tools=args.get("tools"),

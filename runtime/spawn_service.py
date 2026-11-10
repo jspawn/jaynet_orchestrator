@@ -337,6 +337,12 @@ class SpawnService:
                         "error": f"work_root_path {cand} is outside this "
                                  "run's allowed roots — refused"}
             _child_wr = str(cand)
+        # Router controls are harness-generated, never user sampler overrides.
+        # Keep them in a separate run-override channel so a request cannot
+        # smuggle an allowlist-bypassing fallback chain through `sampling`.
+        sampling = dict(sampling or {})
+        router_controls = {k: sampling.pop(k) for k in
+                           ("fallbacks", "disable_fallbacks") if k in sampling}
         child = await self.runtime.run(
             task, share_private=child_share, tools=child_tools,
             disabled_tools=self.disabled_tools,
@@ -363,8 +369,10 @@ class SpawnService:
             # child even when it runs on a specialist alias — the whole
             # point is to override that preset's server-side defaults for
             # this kind of work (execution cold, ideation warm).
-            run_overrides=({"sampling": dict(sampling), "sampling_force": True}
-                           if sampling else None),
+            run_overrides=({"sampling": sampling, "sampling_force": True,
+                            **({"router_controls": router_controls}
+                               if router_controls else {})}
+                           if sampling or router_controls else None),
             # Per-run vision override (specialist.delegate looks up the
             # target slot's caps.vision): None = inherit the brain flag.
             vision=vision,

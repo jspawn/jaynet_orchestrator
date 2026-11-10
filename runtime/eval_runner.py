@@ -463,10 +463,9 @@ def _fallback_fields(runtime, since_ts: float,
 
 
 def _fallback_sources(cfg: dict) -> list[str]:
-    """Aliases a LiteLLM fallback chain can silently substitute FOR: the
-    specialist slot's alias when a preset occupies it (the rendered proxy
-    config always chains local-specialist → local-orchestrator), plus every
-    enabled cloud alias with a non-empty fallbacks list. Read errors degrade
+    """Aliases a LiteLLM fallback chain can silently substitute FOR: local
+    specialist routes can carry request-scoped, preset-priority chains, and
+    enabled cloud aliases keep their configured fallbacks. Read errors degrade
     to [] — no preflight beats a suite blocked by its own safety check."""
     out: list[str] = []
     try:

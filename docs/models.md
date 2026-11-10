@@ -70,6 +70,27 @@ only through Admin → Eval → Proposals, retain proposal/experiment provenance
 and support copy-on-rollback. Resolution follows the active slot, so two presets
 sharing `local-orchestrator` never inherit each other's lessons.
 
+## Routing priority and fallback
+
+Admin → Models → Presets is one drag/drop priority list (top = 1). A strength
+request tries exact-tag presets in list order, then `allround` presets. The
+first non-archived `local-orchestrator` preset is always the final local
+fallback. If Saber is #3 and Turbo Coder #4 and both carry `coding`, Saber is
+primary and Turbo is its coding fallback. Boot model slots are independent:
+reordering changes routing, not which presets start.
+
+Delegation retries failed loads and generation probes down the same chain.
+Request failover uses only allowlisted, payload-compatible presets whose live
+identity was verified, so a stopped alternative sharing a busy port can never
+silently substitute for its occupant. When several presets share one public
+alias, routing uses exact `local-preset-<name>` primary and fallback
+deployments, including that preset's profile and capabilities.
+Backend/thinking capability, think-strip
+family and vision support must match; incompatible candidates fail closed.
+Order is installation-local and is not exported
+in `.jaypack` files. Cloud-provider fallback lists remain configured
+separately under **Cloud models**.
+
 
 ## Quick start / CPU-small (brain, one-model installs)
 

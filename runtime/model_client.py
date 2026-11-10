@@ -79,9 +79,10 @@ _G4_MARKERS_RE = re.compile(r"<\|channel>[^<]*<channel\|>|<\|channel>|<channel\|
 
 _SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
                  "presence_penalty", "frequency_penalty", "seed", "max_tokens")
-# LiteLLM Router controls, not sampler params. Swap-driven delegates set
-# disable_fallbacks so an evicted brain cannot become the child's fallback.
-_ROUTER_CONTROL_KEYS = ("disable_fallbacks",)
+# LiteLLM Router controls, not sampler params. Strength-routed children carry
+# a verified request-scoped fallback chain; disable_fallbacks remains the hard
+# stop when no safe target survives an eviction/allowlist filter.
+_ROUTER_CONTROL_KEYS = ("disable_fallbacks", "fallbacks")
 
 
 class _NullAsyncCtx:

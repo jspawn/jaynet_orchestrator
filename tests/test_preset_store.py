@@ -44,6 +44,64 @@ def test_seed_and_load_roundtrip(tmp_path):
     assert presets["tess"]["preset"] == ""
 
 
+def test_preset_order_defaults_to_legacy_rowid_order(tmp_path):
+    s = _store(tmp_path)
+    assert list(s.load()[0]) == ["brain", "tess"]
+    assert [p["name"] for p in s.list_full()[0]] == ["brain", "tess"]
+
+
+def test_preset_order_roundtrip(tmp_path):
+    s = _store(tmp_path)
+    s.set_order(["tess", "brain"])
+    assert list(s.load()[0]) == ["tess", "brain"]
+    assert [p["name"] for p in s.list_full()[0]] == ["tess", "brain"]
+    with s._conn() as c:
+        raw = c.execute("SELECT value FROM meta WHERE key='preset_order'").fetchone()[0]
+    import json
+    assert json.loads(raw) == ["tess", "brain"]
+
+
+def test_preset_order_appends_new_and_ignores_deleted(tmp_path):
+    s = _store(tmp_path)
+    s.set_order(["tess", "brain"])
+    s.delete("tess")
+    s.upsert("new1", {}, create=True)
+    s.upsert("new2", {}, create=True)
+    assert list(s.load()[0]) == ["brain", "new1", "new2"]
+    assert [p["name"] for p in s.list_full()[0]] == ["brain", "new1", "new2"]
+
+
+def test_preset_order_requires_exact_current_set(tmp_path):
+    s = _store(tmp_path)
+    for names in (["brain", "brain"], ["brain", "ghost"], ["brain"]):
+        with pytest.raises(ValueError, match="exactly once"):
+            s.set_order(names)
+    with pytest.raises(ValueError, match="list of preset names"):
+        s.set_order("brain,tess")
+    assert list(s.load()[0]) == ["brain", "tess"]
+
+
+@pytest.mark.asyncio
+async def test_admin_preset_order_exact_set_and_runtime_layer(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        original = [p["name"] for p in (await c.get("/api/admin/presets")).json()["presets"]]
+        ordered = list(reversed(original))
+        r = await c.put("/api/admin/preset-order", json={"names": ordered})
+        assert r.status_code == 200, r.text
+        assert [p["name"] for p in r.json()["presets"]] == ordered
+        assert list(app.state.runtime.config["models"]["presets"]) == ordered
+        assert "proxy" not in r.json()
+
+        for names in (ordered[:-1], ordered + ["ghost"], ordered[:-1] + [ordered[0]]):
+            assert (await c.put("/api/admin/preset-order",
+                                json={"names": names})).status_code == 400
+        assert (await c.put("/api/admin/preset-order",
+                            json={"names": "not-a-list"})).status_code == 400
+        current = (await c.get("/api/admin/presets")).json()["presets"]
+        assert [p["name"] for p in current] == ordered
+
+
 def test_seed_only_once(tmp_path):
     s = _store(tmp_path)
     s.upsert("brain", {"role": "edited"})

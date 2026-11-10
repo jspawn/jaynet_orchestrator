@@ -164,7 +164,7 @@ class CloudStore:
         for label, v in (("name", name), ("litellm_alias", alias)):
             if not _ALIAS_RE.match(v):
                 raise ValueError(f"invalid {label} {v!r}")
-        if alias in _LOCAL:
+        if alias in _LOCAL or alias.startswith("local-preset-"):
             raise ValueError(f"{alias!r} is a local alias — managed by presets")
         provider = str(r.get("provider_model") or "").strip()
         if not provider:
@@ -345,6 +345,29 @@ def render(config: dict) -> str:
                 "cache": {"no-cache": True, "no-store": True},  # see above
             }})
 
+    # Exact-preset deployments used only by request-scoped strength fallback
+    # chains. Public slot aliases stay stable while the catalog order controls
+    # which of these deployments a run may fall back to.
+    from tools.model.catalog import internal_preset_alias
+    for name, p in presets.items():
+        if p.get("archived") or not p.get("alias"):
+            continue
+        host = (p.get("remote_host") or "").strip()
+        if not host and not p.get("port"):
+            continue
+        api_base = (remote_base(p) if host
+                    else f"http://127.0.0.1:{p.get('port')}") + "/v1"
+        key_env = (p.get("api_key_env") or "").strip() if host else ""
+        model_list.append({
+            "model_name": internal_preset_alias(name),
+            "litellm_params": {
+                "model": f"openai/{p.get('served_id') or p.get('alias')}",
+                "api_base": api_base,
+                "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
+                "max_tokens": 131072,
+                "cache": {"no-cache": True, "no-store": True},
+            }})
+
     rows = CloudStore(db_path_for(config)).list()
     enabled = [r for r in rows if r["enabled"]]
     valid = {r["litellm_alias"] for r in enabled} | set(_LOCAL)
@@ -362,7 +385,14 @@ def render(config: dict) -> str:
         model_list.append({"model_name": r["litellm_alias"],
                            "litellm_params": params})
 
-    fallbacks = [{"local-specialist": ["local-orchestrator"]}]
+    names = [str(m.get("model_name") or "") for m in model_list]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError("duplicate LiteLLM model group(s): " + ", ".join(duplicates))
+
+    # Local strength fallbacks are request-scoped and come from the ordered
+    # preset catalog. Only cloud aliases keep statically configured chains.
+    fallbacks = []
     for r in enabled:
         fb = [f for f in r["fallbacks"] if f in valid
               and f != r["litellm_alias"]]

@@ -82,6 +82,15 @@ assignment or a cloud model re-renders **and reloads** the proxy config,
 so alias routing applies immediately — the repo's `litellm.yaml` stays
 the pristine seed.
 
+**Priority** is one drag/drop list, top = 1. Strength work tries exact-tag
+holders in that order, then `allround` holders; the first non-archived
+`local-orchestrator` preset is the final local fallback (marked **last
+fallback**). Failed loads/probes advance down the chain; request failover
+uses only allowlisted, payload-compatible presets verified live, never a
+different model that happens to occupy a shared port or an incompatible
+backend/think/vision target. Priority is installation-local and does
+not change **Boot model slots** — those still decide what starts.
+
 The preset editor's launch flags open in a **standard view** (model file,
 ctx size, GPU layers, temp — plus split mode/tensor split the moment you
 tick more than one card in the device picker); **all launch options**

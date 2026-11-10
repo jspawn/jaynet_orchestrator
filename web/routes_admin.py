@@ -81,6 +81,26 @@ def _annotate_measured_stale(presets: list[dict]) -> None:
         p["measured_stale"] = _cat.measured_stale(p)
 
 
+def _set_preset_order(store, names) -> None:
+    if not isinstance(names, list):
+        raise HTTPException(400, "names must be a list of preset names")
+    try:
+        store.set_order(names)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+def _register_preset_order_route(app, store, runtime, payload) -> None:
+    from runtime import preset_store as ps
+
+    @app.put("/api/admin/preset-order")
+    async def admin_preset_order_put(request: Request):
+        body = await request.json()
+        _set_preset_order(store(), body.get("names"))
+        ps.load_into_config(runtime.config)
+        return await asyncio.to_thread(payload)
+
+
 # One measurement at a time, box-wide (model.measure hibernates EVERY model).
 _MEASURE_JOB: dict = {"name": None, "state": "idle",
                       "result": None, "error": None, "started": 0.0}
@@ -660,6 +680,8 @@ def register(app, s):
     @app.get("/api/admin/presets")
     async def admin_presets_get():
         return await asyncio.to_thread(_presets_payload)
+
+    _register_preset_order_route(app, _store, runtime, _presets_payload)
 
     @app.post("/api/admin/presets")
     async def admin_presets_create(request: Request):

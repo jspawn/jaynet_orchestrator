@@ -72,10 +72,112 @@ def test_plan_allround_when_no_tagged_preset(monkeypatch):
     assert plan == {"mode": "allround", "alias": "local-specialist"}
 
 
-def test_plan_empty_when_nothing_live_and_no_preset(monkeypatch):
+def test_plan_swaps_allround_when_nothing_is_live(monkeypatch):
     _patch_slots(monkeypatch, {})
     plan = asyncio.run(catalog.strength_route(CFG, "research"))
-    assert plan == {}
+    assert plan == {"mode": "swap", "alias": "local-specialist",
+                    "preset": "specialist", "allround": True}
+
+
+def _priority_cfg():
+    return {"models": {"presets": {
+        "brain": {"alias": "local-orchestrator", "port": 8090,
+                  "strengths": ["reasoning"]},
+        "saber": {"alias": "local-specialist", "port": 8080,
+                  "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "port": 8080,
+                  "strengths": ["coding"]},
+        "allround": {"alias": "local-specialist", "port": 8082,
+                     "strengths": ["allround"]},
+        "other-brain": {"alias": "local-orchestrator", "port": 8090,
+                        "strengths": ["reasoning"]},
+    }, "slots": {"brain": "brain", "specialist": "saber",
+                 "specialist2": "turbo", "specialist3": "allround"}}}
+
+
+def _live(preset, alias, strengths):
+    return {"preset": preset, "alias": alias, "serving": preset,
+            "strengths": strengths}
+
+
+def test_stopped_higher_priority_exact_precedes_live_lower(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "specialist": None,
+        "specialist2": _live("turbo", "local-specialist2", ["coding"])})
+    plan = asyncio.run(catalog.strength_route(cfg, "coding"))
+    assert plan == {"mode": "swap", "alias": "local-specialist", "preset": "saber"}
+
+
+def test_live_exact_routes_follow_catalog_not_slot_order(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "specialist": _live("turbo", "local-specialist", ["coding"]),
+        "specialist2": _live("saber", "local-specialist2", ["coding"])})
+    assert asyncio.run(catalog.route_strength(cfg, "coding")) == "local-specialist2"
+
+
+def test_request_fallbacks_follow_strength_then_brain_priority(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "specialist": _live("saber", "local-specialist", ["coding"]),
+        "specialist2": _live("turbo", "local-specialist2", ["coding"]),
+        "specialist3": _live("allround", "local-specialist3", ["allround"]),
+        "brain": _live("brain", "local-orchestrator", ["reasoning"])})
+    chain = asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-specialist"))
+    assert chain == ["local-preset-turbo", "local-preset-allround",
+                     "local-preset-brain"]
+
+
+def test_request_fallbacks_never_use_a_different_shared_port_occupant(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "specialist": _live("saber", "local-specialist", ["coding"]),
+        "brain": _live("other-brain", "local-orchestrator", ["reasoning"])})
+    # turbo is stopped; other-brain occupies the preferred brain's port. Neither
+    # may be addressed under a different preset's internal fallback alias.
+    assert asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-specialist")) == []
+
+
+def test_request_fallbacks_distinguish_same_public_alias_presets(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "specialist": _live("saber", "local-specialist", ["coding"]),
+        "specialist2": _live("turbo", "local-specialist", ["coding"])})
+    chain = asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-specialist", primary_preset="saber"))
+    assert chain == ["local-preset-turbo"]
+
+
+def test_request_fallbacks_never_target_the_primary_brain_itself(monkeypatch):
+    cfg = _priority_cfg()
+    _patch_slots(monkeypatch, {
+        "brain": _live("brain", "local-orchestrator", ["reasoning"])})
+    assert asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-orchestrator", primary_preset="brain")) == []
+
+
+def test_request_fallbacks_require_payload_compatible_presets(monkeypatch):
+    cfg = _priority_cfg()
+    presets = cfg["models"]["presets"]
+    presets["saber"]["profile"] = {"think_strip": "qwen3"}
+    presets["saber"]["caps"] = {"vision": True}
+    presets["turbo"]["profile"] = {"think_strip": "gemma4"}
+    presets["turbo"]["caps"] = {"vision": True}
+    presets["allround"]["profile"] = {"think_strip": "qwen3"}
+    presets["allround"]["caps"] = {"vision": True}
+    presets["allround"]["backend"] = "vllm"
+    presets["brain"]["profile"] = {"think_strip": "qwen3"}
+    _patch_slots(monkeypatch, {
+        "specialist": _live("saber", "local-specialist", ["coding"]),
+        "specialist2": _live("turbo", "local-specialist2", ["coding"]),
+        "specialist3": _live("allround", "local-specialist3", ["allround"]),
+        "brain": _live("brain", "local-orchestrator", ["reasoning"])})
+    # Different think markup, backend and vision capability each fail closed.
+    assert asyncio.run(catalog.live_strength_fallbacks(
+        cfg, "coding", "local-specialist", primary_preset="saber")) == []
 
 
 class _Ctx:
@@ -316,9 +418,9 @@ def test_delegate_mutation_tool_still_accepted(monkeypatch):
     assert ctx.spawn_calls[0]["tools"] == ["fs.read", "fs.write"]
 
 
-def test_generation_probe_failure_preserves_error_and_restores(monkeypatch):
-    """A listening but non-generating backend fails closed with its OWN error;
-    no child and no fallback-to-evicted-brain attempt is allowed."""
+def test_generation_probe_failure_restores_and_tries_next_route(monkeypatch):
+    """A non-generating candidate keeps its own error in the route note, gets
+    restored, and cannot block the remaining priority chain/default brain."""
     state = {"slot": SPECIALIST_LIVE}
 
     async def fake_live_slot(config, gpu=None, slot="specialist"):
@@ -329,6 +431,8 @@ def test_generation_probe_failure_preserves_error_and_restores(monkeypatch):
         async def execute(self, args, ctx):
             state["slot"] = {"alias": "local-dolphin",
                              "strengths": ["security"], "serving": "dolphin"}
+            if args["preset"] == "specialist":
+                ctx.config["tools"]["code"]["delegate"]["swap_wait_s"] = 0
             return ToolResult(status="ok", tool_name="model.use",
                               result={"evicted": [{"slot": "brain",
                                                    "preset": "occamy-q8"}]})
@@ -345,15 +449,15 @@ def test_generation_probe_failure_preserves_error_and_restores(monkeypatch):
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
     monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
     monkeypatch.setattr("tools.specialist.delegate._generation_probe", probe_fails)
-    ctx = _Ctx(CFG)
+    cfg = {**CFG, "tools": {"code": {"delegate": {"swap_wait_s": 5}}}}
+    ctx = _Ctx(cfg)
     r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
-    assert r.status == "error"
-    assert "original backend failure" in r.error
-    assert r.result["probe_error"] == "HTTP 500: original backend failure"
+    assert r.status == "ok", r.error
+    assert "original backend failure" in r.result["swap"]
     assert r.result["swap_back"] == "restored occamy-q8"
-    assert restored == [[{"slot": "brain", "preset": "occamy-q8"}]]
-    assert ctx.spawn_calls == []
+    assert restored == [[{"slot": "brain", "preset": "occamy-q8"}]] * 2
+    assert ctx.spawn_calls[0]["model"] is None
 
 
 def test_delegate_starting_specialist_is_awaited_and_brain_restored(monkeypatch):
@@ -441,3 +545,107 @@ def test_delegate_restore_failure_prevents_any_child(monkeypatch):
     assert result.status == "error"
     assert "restore failed" in result.error
     assert ctx.spawn_calls == []
+
+
+def test_delegate_failed_exact_load_tries_next_exact_preset(monkeypatch):
+    cfg = {"models": {"presets": {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }}}
+    state = {"slot": None}
+    attempts = []
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return state["slot"] if slot == "specialist" else None
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            attempts.append(args["preset"])
+            if args["preset"] == "saber":
+                return ToolResult(status="error", error="saber failed",
+                                  result={"status": "error", "evicted": []})
+            state["slot"] = _live("turbo", "local-specialist", ["coding"])
+            return ToolResult(status="ok", result={"status": "loaded", "evicted": []})
+
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    ctx = _Ctx(cfg)
+    result = asyncio.run(SpecialistDelegate().execute({"task": "write code"}, ctx))
+    assert result.status == "ok", result.error
+    assert attempts == ["saber", "turbo"]
+    assert ctx.spawn_calls[0]["model"] == "local-preset-turbo"
+    assert "saber failed" in result.result["swap"]
+    assert "'turbo' was swapped" in result.result["swap"]
+
+
+def test_delegate_same_alias_occupant_cannot_confirm_swap(monkeypatch):
+    cfg = {"models": {"presets": {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }}, "tools": {"code": {"delegate": {"swap_wait_s": 0.01}}}}
+    attempts = []
+    probes = []
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return (_live("turbo", "local-specialist", ["coding"])
+                if slot == "specialist" else None)
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            attempts.append(args["preset"])
+            # Report success, but the lower-priority occupant remains live.
+            return ToolResult(status="ok", result={"status": "loaded", "evicted": []})
+
+    async def no_sleep(seconds):
+        return None
+
+    async def probe(preset, served, wait_s):
+        probes.append(preset)
+        return None
+
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    monkeypatch.setattr("tools.specialist.delegate.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("tools.specialist.delegate._generation_probe", probe)
+    ctx = _Ctx(cfg)
+    result = asyncio.run(SpecialistDelegate().execute({"task": "write code"}, ctx))
+    assert result.status == "ok", result.error
+    assert attempts == ["saber"]
+    assert probes == []                    # turbo never confirms saber's load
+    assert ctx.spawn_calls[0]["model"] == "local-preset-turbo"
+
+
+def test_delegate_first_live_shared_alias_uses_exact_target(monkeypatch):
+    cfg = {"models": {"presets": {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }}}
+    _patch_slots(monkeypatch, {
+        "specialist": _live("saber", "local-specialist", ["coding"])})
+    ctx = _Ctx(cfg)
+    result = asyncio.run(SpecialistDelegate().execute({"task": "write code"}, ctx))
+    assert result.status == "ok", result.error
+    assert ctx.spawn_calls[0]["model"] == "local-preset-saber"
+
+
+def test_delegate_first_swap_shared_alias_uses_exact_target(monkeypatch):
+    cfg = {"models": {"presets": {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }}}
+    state = {"slot": None}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return state["slot"] if slot == "specialist" else None
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            state["slot"] = _live("saber", "local-specialist", ["coding"])
+            return ToolResult(status="ok", result={"status": "loaded", "evicted": []})
+
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    ctx = _Ctx(cfg)
+    result = asyncio.run(SpecialistDelegate().execute({"task": "write code"}, ctx))
+    assert result.status == "ok", result.error
+    assert ctx.spawn_calls[0]["model"] == "local-preset-saber"

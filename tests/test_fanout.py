@@ -103,3 +103,32 @@ def test_fanout_no_spawn_runtime():
         ToolContext(request_id="t", config=dict(CFG), budget=None,
                     spawn=None)))
     assert r.status == "error" and "not available" in r.error
+
+
+def test_fanout_strength_shares_priority_fallback_chain(monkeypatch):
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return {
+            "specialist": {"preset": "saber", "alias": "local-specialist",
+                           "serving": "saber", "strengths": ["coding"]},
+            "specialist2": {"preset": "turbo", "alias": "local-specialist2",
+                            "serving": "turbo", "strengths": ["coding"]},
+        }.get(slot)
+    monkeypatch.setattr("tools.model.catalog.live_slot", fake_live_slot)
+    calls = []
+
+    async def fake_spawn(task, **kw):
+        calls.append(kw)
+        return {"status": "ok", "answer": "done"}
+
+    ctx = ToolContext(request_id="t", config={"models": {"presets": {
+        "saber": {"alias": "local-specialist", "strengths": ["coding"]},
+        "turbo": {"alias": "local-specialist", "strengths": ["coding"]},
+    }}}, budget=None, spawn=fake_spawn)
+    r = asyncio.run(AgentFanout().execute(
+        {"tasks": ["a", "b"], "strength": "coding"}, ctx))
+    assert r.status == "ok", r.error
+    assert len(calls) == 2
+    assert all(c["model"] == "local-preset-saber" for c in calls)
+    assert all(c["sampling"] == {
+        "fallbacks": [{"local-preset-saber": ["local-preset-turbo"]}]}
+        for c in calls)

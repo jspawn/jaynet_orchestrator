@@ -697,6 +697,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # unbounded, since that parallelism runs off-box). See _model_sem.
         self._local_concurrency = dict(
             self.config["orchestrator"].get("local_concurrency") or {})
+        from runtime.preset_store import internal_preset_alias
+        for name, p in ((self.config.get("models") or {}).get("presets") or {}).items():
+            limit = self._local_concurrency.get(p.get("alias"))
+            if isinstance(limit, int):
+                self._local_concurrency[internal_preset_alias(name)] = limit
         self._model_sems: dict[str, asyncio.Semaphore] = {}
         # Local aliases beyond the local-* prefix (see _is_local_model): the
         # local_concurrency keys are local backends by definition, so they get

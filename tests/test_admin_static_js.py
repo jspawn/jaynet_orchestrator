@@ -52,6 +52,30 @@ def test_js_referenced_ids_exist():
     assert not missing, f"script references ids with no element: {missing}"
 
 
+def test_preset_catalog_priority_drag_drop_hooks():
+    html = ADMIN_HTML.read_text(encoding="utf-8")
+    js = ADMIN_JS.read_text(encoding="utf-8")
+    css = (STATIC / "admin.css").read_text(encoding="utf-8")
+    assert "<th>Priority</th><th>Name</th>" in html
+    assert "strength routing and failover" in html
+    assert "Boot model slots stay independent" in html
+    assert "archived and helper presets remain reorderable" in html
+    assert 'class="preset-row' in js and 'draggable="true"' in js
+    assert "row.ondragstart" in js and "row.ondragover" in js
+    assert "row.ondrop=e=>presetDrop" in js
+    assert 'api("/api/admin/preset-order"' in js
+    assert "body:JSON.stringify({names})" in js
+    save = js.split("async function savePresetOrder(){", 1)[1].split("\n}", 1)[0]
+    assert "await loadPresets();" in save
+    assert 'filter(q=>!q.archived&&q.alias!=="local-orchestrator"&&(q.strengths||[]).includes(tag))' in js
+    assert "archived, not routed" in js
+    assert "not a specialist candidate" in js
+    assert "last fallback" in js and 'p.alias==="local-orchestrator"' in js
+    assert ".preset-drag-handle" in css and ".preset-drop-after" in css
+    assert '/static/admin.js?v=22' in html
+    assert '/static/admin.css?v=4' in html
+
+
 def _subpane(html: str, pane_id: str) -> str:
     start = html.index(f'<div class="subpane" id="{pane_id}">')
     end = html.find('<div class="subpane"', start + 1)

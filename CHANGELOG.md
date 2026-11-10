@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.44.0 — 2026-11-10
+
+- **Unified preset priority:** Admin → Models → Presets is now one drag/drop
+  list. Exact strength matches route in catalog order, followed by `allround`;
+  the first eligible brain is the universal final local fallback. Boot model
+  slots remain independent, and priority stays installation-local.
+- **Safe failover:** failed model loads and generation probes restore evicted
+  models and advance through the priority chain. Request failover uses only
+  verified-live, allowlisted and payload-compatible presets, with exact-preset
+  routing when public aliases are shared. The old static specialist-to-brain
+  proxy fallback is removed; cloud-provider chains remain separate.
+- **Verification:** 2,841 tests pass, with all CI gates and dependency audits
+  clean. Browser drag/drop and live GPU/proxy failover were not exercised.
+
 ## 1.43.2 — 2026-11-09
 
 - **Native Saber:** build and run Qwen3.8-27B directly on the host with the

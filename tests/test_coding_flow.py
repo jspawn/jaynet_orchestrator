@@ -427,11 +427,17 @@ def test_delegate_progress_stages_emit(tmp_path, monkeypatch):
         return {"mode": "swap", "alias": "local-specialist",
                 "preset": "coder-27b"}
 
-    async def fake_exact(config, wanted):
-        return "local-specialist"
+    state = {"loaded": False}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        if slot == "specialist" and state["loaded"]:
+            return {"preset": "coder-27b", "alias": "local-specialist",
+                    "serving": "coder-27b", "strengths": ["coding"]}
+        return None
 
     class _FakeModelUse:
         async def execute(self, args, ctx):
+            state["loaded"] = True
             return ToolResult(status="ok", tool_name="model.use",
                               result={"evicted": [{"preset": "brain-moe"}]})
 
@@ -439,7 +445,7 @@ def test_delegate_progress_stages_emit(tmp_path, monkeypatch):
         return ["restored brain-moe"]
 
     monkeypatch.setattr(catalog, "strength_route", fake_route_swap)
-    monkeypatch.setattr(catalog, "route_strength_exact", fake_exact)
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
     monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
     async def probe_ok(preset, served_model, wait_s):

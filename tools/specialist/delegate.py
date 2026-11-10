@@ -19,10 +19,10 @@ against the parent).
 
 Routing: coding is the default route — the tool predates the strength system
 and was coding-only, which the historical config path below still reflects.
-The `strength` parameter routes to other specialists instead (research,
-security, multi-step, allround, … — whatever preset strength tags are
-configured; an exact tag beats the 'allround' catch-all). Falls back to the
-default brain when no alias is configured and no matching specialist is live.
+The `strength` parameter routes by the admin catalog's priority: exact tag
+holders first, then the 'allround' catch-all, with the preferred brain last.
+Load/probe failures advance down that chain; request failover uses only
+verified-live, allowlisted presets.
 
 WHEN to use it: a self-contained, multi-step task (implement X, refactor Y,
 fix a failing test, audit Z, research W). NOT for a single edit or lookup you
@@ -467,6 +467,7 @@ class _DelegateRun:
     wanted: str
     model: str | None
     routed: bool = False
+    route_preset: str = ""
     swap_note: str | None = None
     evicted: list[dict] = field(default_factory=list)  # what the swap stopped — restored below
     tools: list = field(default_factory=list)
@@ -478,6 +479,7 @@ class _DelegateRun:
     baseline: tuple[str | None, str | None] = (None, None)
     worker_base: str | None = None
     swap_back_note: str | None = None
+    fallback_aliases: list[str] = field(default_factory=list)
     child: dict = field(default_factory=dict)
     answer: str = ""
     cutoff_hint: str | None = None
@@ -629,31 +631,90 @@ class SpecialistDelegate(Tool):
         await self._review_result(run)
         return await self._assemble_result(run)
 
+    async def _route_plans(self, run: _DelegateRun) -> list[dict]:
+        """Catalog-priority candidates plus the preferred brain, retaining the
+        long-standing custom strength_route extension seam."""
+        from runtime.preset_store import route_target
+        from tools.model.catalog import (
+            live_slot,
+            preferred_brain,
+            strength_plans,
+            strength_route,
+        )
+        first = await strength_route(run.ctx.config, run.wanted)
+        plans = await strength_plans(run.ctx.config, run.wanted)
+        if first:
+            for i, plan in enumerate(plans):
+                if plan.get("mode") == first.get("mode") \
+                        and plan.get("alias") == first.get("alias") \
+                        and (plan.get("mode") != "swap"
+                             or plan.get("preset") == first.get("preset")):
+                    matched = plans.pop(i)
+                    # The public route keeps its legacy shape for gate prompts;
+                    # restore the exact target/identity needed by the child.
+                    first = {**matched, **first}
+                    break
+            plans.insert(0, first)
+        brain = preferred_brain(run.ctx.config)
+        if brain:
+            current = await live_slot(run.ctx.config, slot="brain")
+            presets = ((run.ctx.config.get("models") or {}).get("presets") or {})
+            preset = presets.get(brain["preset"]) or {}
+            target = route_target(presets, brain["preset"])
+            if current and current.get("preset") == brain["preset"]:
+                plans.append({**brain, "mode": "live", "brain": True,
+                              "target": target})
+            elif not (preset.get("remote_host") or "").strip():
+                plans.append({**brain, "mode": "swap", "brain": True,
+                              "target": target})
+        return plans
+
     async def _route_model(self, run: _DelegateRun) -> ToolResult | None:
-        """Route by strength; a failed generation probe stops before spawning."""
+        """Try strength candidates in catalog order, then the preferred brain."""
         model = run.model
         if model is None:
-            # Model priority by strengths (preset tags): work belongs on the
-            # model strong at it, not the default brain. A tagged-but-stopped
-            # LOCAL preset is swapped onto its slot (freeing the occupant,
-            # e.g. the coder on GPU 1) instead of settling for the allround
-            # model; no tag preset at all → the allround specialist.
             from tools.model.catalog import (
                 ModelUse,
+                _live_routes,
+                live_slot,
+                live_strength_fallbacks,
                 restore_evicted,
-                route_strength,
-                route_strength_exact,
-                strength_route,
             )
-            plan = await strength_route(run.ctx.config, run.wanted)
-            if plan.get("mode") == "swap":
+            plans = await self._route_plans(run)
+            failures = []
+            failed_presets = set()
+            for plan in plans:
+                if plan.get("mode") != "swap":
+                    if not plan.get("preset"):
+                        # Legacy custom strength_route result: already probed by
+                        # the caller's router, with no catalog identity to check.
+                        model, run.routed = plan["alias"], True
+                        break
+                    if plan.get("brain"):
+                        current = await live_slot(run.ctx.config, slot="brain")
+                    else:
+                        current = next((r for r in await _live_routes(run.ctx.config)
+                                        if r.get("preset") == plan.get("preset")), None)
+                    if current and current.get("preset") == plan.get("preset"):
+                        model = plan.get("target") or current["alias"]
+                        run.routed = True
+                        run.route_preset = str(plan["preset"])
+                        break
+                    preset_cfg = ((run.ctx.config.get("models") or {})
+                                  .get("presets") or {}).get(plan["preset"]) or {}
+                    if (preset_cfg.get("remote_host") or "").strip():
+                        failures.append(f"remote preset '{plan['preset']}' went offline")
+                        failed_presets.add(plan["preset"])
+                        continue
+                    # An earlier failed swap may have evicted this formerly-live
+                    # candidate. Turn its stale live plan into a real load attempt.
+                    plan = {**plan, "mode": "swap",
+                            "alias": preset_cfg.get("alias") or plan["alias"]}
                 await _progress(run.ctx, f"route: {run.wanted} → swapping in "
                                          f"'{plan['preset']}' (loading takes a "
                                          "moment)…")
-                # Brain eviction is allowed HERE (internal ctx flag, not a
-                # model-facing argument): the incoming specialist may need
-                # GPUs the brain sits on (e.g. a 2-card brain), and the
-                # swap-back below restores it before the parent's next turn.
+                # A specialist may need the brain's GPUs. Restore whatever this
+                # attempt evicted before trying the next candidate.
                 run.ctx._allow_brain_evict = True
                 try:
                     res = await ModelUse().execute(
@@ -661,9 +722,6 @@ class SpecialistDelegate(Tool):
                          "include_brain": True}, run.ctx)
                 finally:
                     run.ctx._allow_brain_evict = False
-                # Keep the restore list even when the model is still starting
-                # or its launch failed after eviction. `starting` is pending,
-                # not failure: poll the exact route and generation probe.
                 run.evicted = list((res.result or {}).get("evicted") or [])
                 launch = res.result or {}
                 launch_state = str(launch.get("status") or launch.get("state") or "")
@@ -675,80 +733,91 @@ class SpecialistDelegate(Tool):
                     except (TypeError, ValueError):
                         wait_s = 120.0
                     deadline = time.monotonic() + max(0.0, wait_s)
-                    confirm = None
+                    confirmed = None
                     while time.monotonic() < deadline:
-                        confirm = await route_strength_exact(run.ctx.config,
-                                                             run.wanted)
-                        if confirm:
-                            break
+                        if plan.get("brain"):
+                            current = await live_slot(run.ctx.config, slot="brain")
+                        else:
+                            current = next(
+                                (r for r in await _live_routes(run.ctx.config)
+                                 if r.get("preset") == plan["preset"]), None)
+                        if current:
+                            strengths = current.get("strengths") or []
+                            if plan.get("brain") or (plan.get("allround")
+                                                     and "allround" in strengths) \
+                                    or (not plan.get("allround")
+                                        and run.wanted in strengths):
+                                confirmed = current
+                                break
                         await asyncio.sleep(2.0)
-                    ok = bool(confirm)
-                if ok:
-                    from tools.model.catalog import live_slot
+                    ok = confirmed is not None
+                probe_error = None
+                if ok and confirmed is not None:
                     preset_cfg = ((run.ctx.config.get("models") or {})
                                   .get("presets") or {}).get(plan["preset"]) or {}
-                    slot = await live_slot(run.ctx.config)
-                    served = (slot or {}).get("serving") or preset_cfg.get("served_id") or ""
+                    served = (confirmed.get("serving")
+                              or preset_cfg.get("served_id") or "")
                     try:
                         probe_wait_s = float(run.cfg.get("generation_probe_wait_s", 60))
                     except (TypeError, ValueError):
                         probe_wait_s = 60.0
                     probe_error = await _generation_probe(
                         preset_cfg, served, max(0.0, probe_wait_s))
-                    if probe_error is not None:
-                        # Preserve the ORIGINAL backend failure and fail closed.
-                        # Never spawn through a proxy fallback to the evicted brain.
-                        log.warning("post-swap generation probe failed for '%s': %s",
-                                    plan["preset"], probe_error)
-                        notes = await restore_evicted(run.ctx, run.evicted)
-                        run.evicted = []
-                        run.swap_back_note = "; ".join(notes)
-                        error = (f"specialist '{plan['preset']}' failed its "
-                                 f"generation probe: {probe_error}")
-                        await _progress(run.ctx, error, ok=False)
-                        return ToolResult(
-                            status="error", tool_name=self.name,
-                            result={"status": "error", "preset": plan["preset"],
-                                    "probe_error": probe_error,
-                                    "swap_back": run.swap_back_note},
-                            error=error)
-                    model, run.routed = plan["alias"], True
+                    ok = probe_error is None
+                if ok and confirmed is not None:
+                    model = plan.get("target") or confirmed["alias"]
+                    run.routed = True
+                    run.route_preset = str(plan["preset"])
                     run.swap_note = (f"'{plan['preset']}' was swapped onto its "
                                      f"slot for this {run.wanted} task (the slot's "
                                      "previous model was stopped)")
                     await _progress(run.ctx, f"'{plan['preset']}' loaded and answered "
                                              f"the generation probe — running the "
                                              f"{run.wanted} task", ok=True)
+                    break
+
+                if probe_error:
+                    log.warning("post-swap generation probe failed for '%s': %s",
+                                plan["preset"], probe_error)
+                    error = (f"specialist '{plan['preset']}' failed its "
+                             f"generation probe: {probe_error}")
                 else:
-                    # ModelUse may already have rolled back a post-eviction
-                    # launch error. Otherwise restore HERE, before an allround
-                    # or default-brain child can touch the evicted endpoint.
-                    prior_restore = (res.result or {}).get("restore")
-                    notes = ([str(prior_restore)] if prior_restore is not None
-                             else await restore_evicted(run.ctx, run.evicted))
-                    run.evicted = []
-                    run.swap_back_note = "; ".join(notes)
-                    failed = [n for n in notes if n.startswith("FAILED")]
-                    run.swap_note = (f"could not swap in '{plan['preset']}' "
-                                     f"({res.error or (res.result or {}).get('status')})")
-                    if failed:
-                        error = (run.swap_note + "; restore failed: "
-                                 + run.swap_back_note)
-                        await _progress(run.ctx, error, ok=False)
-                        return ToolResult(
-                            status="error", tool_name=self.name,
-                            result={"status": "error", "preset": plan["preset"],
-                                    "swap_back": run.swap_back_note}, error=error)
-                    run.swap_note += " — fell back to the allround route"
-                    await _progress(run.ctx, f"swap of '{plan['preset']}' failed — "
-                                             "falling back to the allround route",
-                                    ok=False)
-                    plan = {"mode": "allround",
-                            "alias": await route_strength(run.ctx.config,
-                                                          run.wanted)}
-            if model is None and plan.get("alias"):
-                model, run.routed = plan["alias"], True
-            if run.routed and not run.swap_note:
+                    error = (f"could not swap in '{plan['preset']}' "
+                             f"({res.error or launch.get('status')})")
+                # ModelUse may already have rolled back a launch error. A failed
+                # restore is fatal: no fallback may touch unknown GPU state.
+                prior_restore = launch.get("restore")
+                notes = ([str(prior_restore)] if prior_restore is not None
+                         else await restore_evicted(run.ctx, run.evicted))
+                run.evicted = []
+                run.swap_back_note = "; ".join(notes)
+                failed = [n for n in notes if n.startswith("FAILED")]
+                if failed:
+                    error += "; restore failed: " + run.swap_back_note
+                    await _progress(run.ctx, error, ok=False)
+                    return ToolResult(
+                        status="error", tool_name=self.name,
+                        result={"status": "error", "preset": plan["preset"],
+                                "probe_error": probe_error,
+                                "swap_back": run.swap_back_note}, error=error)
+                failures.append(error)
+                failed_presets.add(plan["preset"])
+                await _progress(run.ctx, error + " — trying the next preset",
+                                ok=False)
+
+            if failures:
+                run.swap_note = "; ".join(
+                    failures + ([run.swap_note] if run.swap_note else []))
+            if model is None and failures:
+                # No catalog brain was available (legacy/minimal configs). The
+                # runtime's default brain remains the honest final fallback.
+                await _progress(run.ctx, "all priority routes failed — using the "
+                                         "default brain", ok=False)
+            if model and run.routed:
+                run.fallback_aliases = await live_strength_fallbacks(
+                    run.ctx.config, run.wanted, model,
+                    primary_preset=run.route_preset,
+                    exclude_presets=failed_presets)
                 await _progress(run.ctx, f"route: {run.wanted} → {model}")
         run.model = model
         return None
@@ -919,9 +988,11 @@ class SpecialistDelegate(Tool):
             # profile.role_temperature wins for tags it pins (global as fallback).
             _rs = dict(role_sampling(run.ctx.config, run.wanted, model=run.model)
                        or {})
-            if run.evicted:
-                # A swapped-out brain/specialist cannot be this child's fallback.
-                # Keep the original target's error instead of retrying a dead port.
+            if run.model and run.fallback_aliases:
+                _rs["fallbacks"] = [{run.model: run.fallback_aliases}]
+            elif run.evicted:
+                # No verified target survived the swap: never retry a dead port
+                # or let an evicted brain answer through a static proxy chain.
                 _rs["disable_fallbacks"] = True
             run.child = await run.ctx.spawn(
                 run.task, tools=run.tools, model=run.model,

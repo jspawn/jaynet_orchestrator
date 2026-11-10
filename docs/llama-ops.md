@@ -239,10 +239,14 @@ loads whichever the current task needs in place of the previous one.
   service restart).
   After the slot answers, the delegate requires one tiny generation directly
   from the new backend (`tools.code.delegate.generation_probe_wait_s`, default
-  60s). Only then does the child start. Its requests carry
-  `disable_fallbacks: true`: an evicted brain must never become that child's
-  fallback. A failed probe or child keeps the original backend/proxy error in
-  the result and log, and the evicted models are restored as usual.
+  60s). Only then does the child start, after the serving preset's identity
+  (not just its public alias) is confirmed. Shared public aliases resolve to
+  exact-preset deployments for the child and its profile/capabilities. A failed
+  load/probe restores evicted models and advances through the catalog's priority chain: exact strength
+  holders, `allround`, then the preferred brain. Request failover carries only
+  verified-live, allowlisted, payload-compatible targets; evicted models are excluded, with
+  `disable_fallbacks: true` as the fail-closed default when no safe target
+  remains. Errors and restores stay visible in the result and log.
 - **Two brains at once:** register two brain servers under the same
   `local-orchestrator` alias in `config/litellm.yaml` with
   `routing_strategy: simple-shuffle` — the proxy round-robins, and with

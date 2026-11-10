@@ -737,12 +737,56 @@ function vramCell(p){
   if(p.vram_gib!=null) return `<span class="muted" title="hand estimate — model.measure records the real footprint">${p.vram_gib}?</span>`;
   return `<span class="muted" title="no footprint known — the loader can't pack this model by fit">—</span>`;
 }
+let _presetDragName=null, _presetOrderSaving=false;
+function presetStrengthRank(p,tag){
+  if(p.archived) return `${tag} — archived, not routed`;
+  if(p.alias==="local-orchestrator") return `${tag} — brain, not a specialist candidate`;
+  const holders=_presets.presets.filter(q=>!q.archived&&q.alias!=="local-orchestrator"&&(q.strengths||[]).includes(tag));
+  return `${tag} rank ${holders.findIndex(q=>q.name===p.name)+1} of ${holders.length}`;
+}
+function clearPresetDropMarkers(){
+  $("#presetRows").querySelectorAll(".preset-drop-before,.preset-drop-after").forEach(r=>
+    r.classList.remove("preset-drop-before","preset-drop-after"));
+}
+async function savePresetOrder(){
+  const names=_presets.presets.map(p=>p.name);
+  _presetOrderSaving=true;
+  try{
+    const r=await api("/api/admin/preset-order",{method:"PUT",headers:{"content-type":"application/json"},
+      body:JSON.stringify({names})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.detail||"error");
+    _presets=j; renderPresetRows(); note($("#presetNote"),"priority saved",true);
+  }catch(e){
+    await loadPresets();
+    note($("#presetNote"),"priority save failed: "+(e.message||e)+" — server order restored",false);
+  }finally{ _presetOrderSaving=false; }
+}
+function presetDrop(e,targetName){
+  e.preventDefault();
+  const source=_presetDragName;
+  clearPresetDropMarkers(); _presetDragName=null;
+  if(!source||source===targetName||_presetOrderSaving) return;
+  const rows=_presets.presets, from=rows.findIndex(p=>p.name===source);
+  if(from<0) return;
+  const rect=e.currentTarget.getBoundingClientRect();
+  const after=e.clientY>=rect.top+rect.height/2;
+  const [moved]=rows.splice(from,1);
+  let at=rows.findIndex(p=>p.name===targetName);
+  if(after) at++;
+  rows.splice(at,0,moved);
+  renderPresetRows();
+  savePresetOrder();
+}
 function renderPresetRows(){
-  $("#presetRows").innerHTML=_presets.presets.map(p=>{
+  const fallback=_presets.presets.find(p=>!p.archived&&p.alias==="local-orchestrator");
+  $("#presetRows").innerHTML=_presets.presets.map((p,i)=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr${p.archived?' class="muted" style="opacity:.55"':""}><td><b>${esc(p.name)}</b>${p.archived?' <span class="pill">archived</span>':""}</td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
+    const ranks=(p.strengths||[]).map(t=>presetStrengthRank(p,t));
+    const priorityTip=`Global priority ${i+1}: matching strength routing and failover try this order. Boot model slots stay independent.${ranks.length?"\n"+ranks.join("\n"):""}`;
+    return `<tr class="preset-row${p.archived?" muted":""}" data-preset-name="${esc(p.name)}" draggable="true"${p.archived?' style="opacity:.55"':""}><td class="preset-priority-cell"><span class="preset-drag-handle" title="Drag to reorder priority">⠿</span><span title="${esc(priorityTip)}">${i+1}</span></td><td><b>${esc(p.name)}</b>${p.archived?' <span class="pill">archived</span>':""}${fallback&&fallback.name===p.name?' <span class="pill preset-fallback" title="First non-archived local-orchestrator preset in catalog priority order">last fallback</span>':""}</td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${vramCell(p)}</td>
-      <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
+      <td>${(p.strengths||[]).map(t=>`<span class="pill" title="${esc(presetStrengthRank(p,t)+" — exact-tag holders in catalog order")}">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
         ${p.remote_host||p.archived||!p.alias?"":`<button data-measure="${esc(p.name)}" title="model.measure: hibernates ALL models (brain too), loads this preset, probes it once, writes the real VRAM/RAM into the catalog, then restores — a few minutes, chat down meanwhile">measure</button>`}
@@ -751,6 +795,26 @@ function renderPresetRows(){
         <button data-x="${esc(p.name)}" title="Export as .jaypack (shareable preset pack)">export</button>
         <button class="danger" data-del="${esc(p.name)}">delete</button></td></tr>`;
   }).join("");
+  $("#presetRows").querySelectorAll(".preset-row").forEach(row=>{
+    row.ondragstart=e=>{
+      if(_presetOrderSaving){ e.preventDefault(); return; }
+      _presetDragName=row.dataset.presetName;
+      row.classList.add("dragging");
+      if(e.dataTransfer){ e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain",_presetDragName); }
+    };
+    row.ondragover=e=>{
+      if(!_presetDragName||_presetDragName===row.dataset.presetName) return;
+      e.preventDefault();
+      if(e.dataTransfer) e.dataTransfer.dropEffect="move";
+      const rect=row.getBoundingClientRect();
+      const after=e.clientY>=rect.top+rect.height/2;
+      row.classList.toggle("preset-drop-after",after);
+      row.classList.toggle("preset-drop-before",!after);
+    };
+    row.ondragleave=()=>row.classList.remove("preset-drop-before","preset-drop-after");
+    row.ondrop=e=>presetDrop(e,row.dataset.presetName);
+    row.ondragend=()=>{ _presetDragName=null; row.classList.remove("dragging"); clearPresetDropMarkers(); };
+  });
   $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
   $("#presetRows").querySelectorAll("[data-measure]").forEach(b=>b.onclick=()=>presetMeasure(b.dataset.measure));
   $("#presetRows").querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>editPreset(b.dataset.dup,true));
