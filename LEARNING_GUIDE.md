@@ -1150,5 +1150,5 @@ ablation says prove it.
 
 ---
 
-*Theory companion for JayNet v1.44.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.45.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*

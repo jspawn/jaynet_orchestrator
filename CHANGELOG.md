@@ -5,6 +5,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.45.0 — 2026-11-10
+
+- **Managed Saber Flash-Next:** Qwen3.8 Flash-Next TP2 presets now launch
+  natively through the existing lifecycle wrapper, with trunk8 pack validation,
+  FP8 KV, 262K context, lazy vision and graceful process-group shutdown. The
+  new reference preset needs no separate DFlash2 pack; 27B behavior is unchanged.
+- **Verification:** 2,844 tests pass. The live pack and preset dry-run resolve
+  correctly; a real Flash-Next GPU swap remains to be tested after deployment.
+
 ## 1.44.0 — 2026-11-10
 
 - **Unified preset priority:** Admin → Models → Presets is now one drag/drop
