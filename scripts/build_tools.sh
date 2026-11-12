@@ -819,12 +819,13 @@ apply_llama_patches() {
     cat > "${BASE_DIR}/patches/llama-sigterm-safe-exit.patch" <<'PATCH'
 --- a/tools/server/server.cpp
 +++ b/tools/server/server.cpp
-@@ -14,6 +14,7 @@
- 
+@@ -16,7 +16,8 @@
+ #include <algorithm>
  #include <atomic>
  #include <clocale>
 +#include <cstdlib>
  #include <exception>
+ #include <mutex>
  #include <signal.h>
  #include <thread> // for std::thread::hardware_concurrency
 @@ -30,7 +31,7 @@
