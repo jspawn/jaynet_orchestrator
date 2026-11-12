@@ -290,6 +290,15 @@ template accepts system text only at index 0, so JayNet merges all system
 directives there. The launcher raises its soft file-descriptor limit to 65536
 for the 131-shard checkpoint. The managed Flash-Next path is native-only.
 
+Occamy FP8 uses an Occamy-capable Saber architecture fork, two consecutive
+GPUs and `SABER_MODEL=occamy`. The reference `brain-occamy-fp8-saber-tp2.conf`
+maps `MODEL_PATH` to the FP8 routed-expert pack, `OCCAMY_LAYERS`/`OCCAMY_GLOBALS`
+to the BF16 packs and `OCCAMY_CHECKPOINT` to the BF16 checkpoint. Set
+`SABER_REPO` and `SABER_BIN` for the fork. `MTP_MODEL` is the optional official
+BF16 head; `SPEC_DRAFT_N_MAX=1` selects its fastest validated greedy depth and
+requires `MAX_NUM_SEQS=1`. This path is text-only, supports full 262K context,
+and binds loopback by default through `scripts/saber-occamy-native.sh`.
+
 ## External embed / rerank endpoints
 
 The RAG tools talk to plain URLs (`tools.rag.embed_url` /

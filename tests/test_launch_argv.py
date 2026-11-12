@@ -220,3 +220,51 @@ def test_saber_flashnext_requires_tp2_and_complete_pack(tmp_path):
      "qwen38-flashnext-quark-trunk8" / "rank1" / "trunk8.pack").unlink()
     with pytest.raises(ValueError, match="rank1/trunk8.pack"):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
+
+
+def _occamy_conf(tmp_path):
+    packs = tmp_path / "packs"
+    paths = {key: packs / key.lower() for key in
+             ("OCCAMY_FP8", "OCCAMY_LAYERS", "OCCAMY_GLOBALS")}
+    checkpoint = tmp_path / "checkpoint"
+    for directory in (*paths.values(), checkpoint):
+        directory.mkdir(parents=True)
+    (checkpoint / "config.json").write_text("{}")
+    mtp = tmp_path / "mtp.safetensors"
+    mtp.write_text("MTP")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    binary = repo / "saber"
+    binary.write_text("")
+    return {"SABER_MODEL": "occamy", "MODEL_PATH": str(paths["OCCAMY_FP8"]),
+            "OCCAMY_LAYERS": str(paths["OCCAMY_LAYERS"]),
+            "OCCAMY_GLOBALS": str(paths["OCCAMY_GLOBALS"]),
+            "OCCAMY_CHECKPOINT": str(checkpoint), "MTP_MODEL": str(mtp),
+            "SABER_REPO": str(repo), "SABER_BIN": str(binary),
+            "SPEC_DRAFT_N_MAX": "1", "CTX_SIZE": "262144",
+            "MAX_NUM_SEQS": "1", "EXTRA_ARGS": "--verbose"}
+
+
+def test_saber_occamy_maps_fp8_packs_mtp_and_loopback(tmp_path):
+    conf = _occamy_conf(tmp_path)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="occamy-fp8"))
+    assert argv == ["/bin/x", "--verbose"]
+    assert env["SABER_MODEL"] == "occamy"
+    assert env["OCCAMY_FP8"] == conf["MODEL_PATH"]
+    assert env["OCCAMY_MTP"] == conf["MTP_MODEL"]
+    assert env["SPEC_DEPTH"] == "1" and env["MAX_REQUESTS"] == "1"
+    assert env["HIP_DEVICES"] == "0,1" and env["DEVICE"] == "0"
+    assert env["HOST"] == "127.0.0.1" and env["MODEL"] == "occamy-fp8"
+    assert env["SABER_BIN"] == conf["SABER_BIN"]
+    assert env["MAX_CTX"] == "262144"
+    assert warns == []
+
+
+def test_saber_occamy_requires_consecutive_cards_and_single_mtp_request(tmp_path):
+    conf = _occamy_conf(tmp_path)
+    with pytest.raises(ValueError, match="consecutive GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1,0"))
+    conf["MAX_NUM_SEQS"] = "2"
+    with pytest.raises(ValueError, match="MAX_NUM_SEQS=1"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))

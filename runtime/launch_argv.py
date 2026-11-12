@@ -59,10 +59,64 @@ def parse_conf(path: str) -> dict[str, str]:
     return out
 
 
+def _saber_occamy_env(conf: dict[str, str], cards: list[str], *, host: str,
+                      port: str, alias: str) -> dict[str, str]:
+    """Validate the separate Occamy fork's packs and render its launcher env."""
+    if len(cards) != 2:
+        raise ValueError("saber Occamy needs two consecutive GPUs (TP=2)")
+    try:
+        first, second = (int(c) for c in cards)
+    except ValueError:
+        raise ValueError("saber Occamy needs two consecutive GPUs (TP=2)") from None
+    if second != first + 1:
+        raise ValueError("saber Occamy needs two consecutive GPUs (TP=2)")
+    paths = {
+        "OCCAMY_FP8": (conf.get("MODEL_PATH") or "").strip(),
+        "OCCAMY_LAYERS": (conf.get("OCCAMY_LAYERS") or "").strip(),
+        "OCCAMY_GLOBALS": (conf.get("OCCAMY_GLOBALS") or "").strip(),
+        "OCCAMY_CHECKPOINT": (conf.get("OCCAMY_CHECKPOINT") or "").strip(),
+    }
+    for key, path in paths.items():
+        if not path or not os.path.isdir(path):
+            raise ValueError(f"saber Occamy directory not found: {key}={path or '<unset>'}")
+    if not os.path.isfile(os.path.join(paths["OCCAMY_CHECKPOINT"], "config.json")):
+        raise ValueError("saber Occamy checkpoint has no config.json")
+    mtp = (conf.get("MTP_MODEL") or "").strip()
+    if mtp and not os.path.isfile(mtp):
+        raise ValueError(f"saber Occamy MTP file not found: {mtp}")
+    max_requests = conf.get("MAX_NUM_SEQS") or "1"
+    if mtp and max_requests != "1":
+        raise ValueError("saber Occamy MTP needs MAX_NUM_SEQS=1")
+    repo = (conf.get("SABER_REPO") or "").strip()
+    binary = (conf.get("SABER_BIN") or "").strip()
+    if repo and not os.path.isdir(repo):
+        raise ValueError(f"saber Occamy repository not found: {repo}")
+    if binary and not os.path.isfile(binary):
+        raise ValueError(f"saber Occamy binary not found: {binary}")
+    env = {
+        "PORT": str(port), "HOST": host, "SABER_MODEL": "occamy",
+        **paths, "OCCAMY_MTP": mtp,
+        "MODEL": alias or "occamy-1.0", "CNAME": f"saber-jaynet-{port}",
+        "HIP_DEVICES": ",".join(cards), "DEVICE": str(first),
+        "MAX_REQUESTS": max_requests,
+        "SPEC_DEPTH": conf.get("SPEC_DRAFT_N_MAX") or "1",
+    }
+    if repo:
+        env["SABER_REPO"] = repo
+    if binary:
+        env["SABER_BIN"] = binary
+    if conf.get("CTX_SIZE"):
+        env["MAX_CTX"] = conf["CTX_SIZE"]
+    return env
+
+
 def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
                port: str, alias: str) -> dict[str, str]:
     """Validate a managed Saber pack and render its native launcher's env."""
     model = (conf.get("MODEL_PATH") or "").strip()
+    if conf.get("SABER_MODEL") == "occamy":
+        return _saber_occamy_env(conf, cards, host=host, port=port, alias=alias)
+
     if conf.get("SABER_MODEL") == "flashnext":
         if len(cards) != 2:
             raise ValueError("saber Flash-Next needs two GPUs (TP=2)")
@@ -141,7 +195,10 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
 
     warns: list[str] = []
     for key in _KNOWN_LLAMA_ONLY:
-        if conf.get(key) and not (backend == "saber" and key == "MTP_MODEL"):
+        saber_key = backend == "saber" and (
+            key == "MTP_MODEL"
+            or (conf.get("SABER_MODEL") == "occamy" and key == "SPEC_DRAFT_N_MAX"))
+        if conf.get(key) and not saber_key:
             warns.append(f"{key} dropped: llama-only, no {backend} equivalent")
     extra = shlex.split(conf.get("EXTRA_ARGS") or "")
     cards = [c for c in gpu.split(",") if c.strip()]
