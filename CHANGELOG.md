@@ -5,6 +5,45 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.50.0 — 2026-11-16
+
+Cumulative public release rolling up v1.41.0–v1.45.2 and the final Saber /
+llama.cpp build fixes since v1.40.1.
+
+- **Model routing:** one priority-ordered preset catalog drives exact-strength,
+  `allround` and final-brain routing. Failed specialist swaps restore evicted
+  models; request failover uses only verified-live, allowlisted and
+  payload-compatible presets. The old static specialist-to-brain proxy fallback
+  is removed.
+- **Local engines:** opt-in Saber ROCm support covers Qwen3.8-27B TP1/TP2,
+  Flash-Next and an experimental Occamy FP8 launcher, with native and container
+  lifecycles. vLLM/radiance throughput, `.rad` downloads and engine update
+  watchers are integrated; the llama.cpp safe-exit patch applies to current
+  upstream again.
+- **Context and knowledge:** explicit natural memory/RAG recall, KG aliases and
+  evidence-aware transcript compaction retain useful local context while
+  preserving owner scope, provenance and recoverable tool output.
+- **Delegation and workflows:** specialists keep the parent's workspace and
+  store redirects, can use narrowed read-only knowledge retrieval, and respect
+  per-run vision and strict chat templates. Deterministic gates cover architect,
+  review, debugging, research and presentation workflows.
+- **Durable schedules:** scheduled prompts use persistent work items, execution
+  attempts and an idempotent chat-delivery outbox. Observe-only arXiv watches
+  record new papers without starting agent runs.
+- **Trustworthy evals:** versioned per-brain overlays, run-local model
+  allowlists, fallback invalidation and judge/harness fixes make cross-model
+  comparisons attributable to the model and overlay actually tested.
+- **Operations:** running presets expose RAM/VRAM/GPU/disk details; delegates
+  show model and trigger labels; jevify can select local presets. Scheduled-work,
+  proposal, preset-priority and benchmark screenshots are refreshed.
+- **Reliability and security:** dependency advisories are addressed, including
+  dnspython 2.9.2 and opentelemetry-api 1.45.2; LiteLLM auth errors return 401
+  correctly, h5i/jevify compatibility is current, and long-running
+  audio/document tools have suitable timeout budgets.
+- **Upgrade:** sync the main, tools and LiteLLM lockfiles, then restart both services.
+  SQLite migrations are additive and automatic. Review preset priority after
+  upgrading; Saber and automatic RAG recall remain opt-in.
+
 ## 1.45.2 — 2026-11-10
 
 - **Audit follow-ups:** declare the model-client mixin's configuration contract,
