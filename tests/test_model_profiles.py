@@ -120,6 +120,21 @@ def test_profile_for_resolves_by_alias():
     assert profile_for({}, "local-orchestrator") == {}
 
 
+def test_profile_for_uses_active_slot_and_empty_specialist_brain():
+    cfg = {"models": {"presets": {
+        "old-brain": {"alias": "local-orchestrator",
+                      "profile": {"sampling": {"temperature": 0.9}}},
+        "assigned": {"alias": "local-specialist",
+                     "profile": {"sampling": {"temperature": 0.1}}},
+        "specialist": {"alias": "local-specialist",
+                       "profile": {"sampling": {"temperature": 0.3}}},
+    }, "slots": {"brain": "assigned", "specialist": ""}}}
+    assert profile_for(cfg, "local-orchestrator")["sampling"] == {"temperature": 0.1}
+    assert profile_for(cfg, "local-specialist")["sampling"] == {"temperature": 0.1}
+    cfg["models"]["slots"]["specialist"] = "specialist"
+    assert profile_for(cfg, "local-specialist")["sampling"] == {"temperature": 0.3}
+
+
 # ---- think-strip family ----
 
 def test_strip_think_families():

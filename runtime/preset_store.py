@@ -273,9 +273,19 @@ def profile_for(config: dict, alias: str | None) -> dict:
     restart, same as the other per-turn knobs."""
     if not alias:
         return {}
-    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    models = ((config or {}).get("models") or {})
+    presets = models.get("presets") or {}
     if str(alias).startswith(INTERNAL_ALIAS_PREFIX):
         p = presets.get(str(alias)[len(INTERNAL_ALIAS_PREFIX):]) or {}
+        prof = p.get("profile")
+        return prof if isinstance(prof, dict) else {}
+    slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
+    slots = models.get("slots") or {}
+    if slot and slot in slots:
+        p = resolve_slot(config, slot)
+        if not p and slot == "specialist" and not slots.get(slot):
+            # cloud_store points an explicitly empty specialist at the brain.
+            p = resolve_slot(config, "brain")
         prof = p.get("profile")
         return prof if isinstance(prof, dict) else {}
     for p in presets.values():

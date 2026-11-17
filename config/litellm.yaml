@@ -40,7 +40,7 @@ model_list:
       model: openai/qwen2.5-coder-32b
       api_base: http://127.0.0.1:8080/v1
       api_key: "not-needed"
-      max_tokens: 131072
+      max_tokens: 8192   # completion default, not the context size
       cache:      # off — see local-orchestrator above
         no-cache: true
         no-store: true

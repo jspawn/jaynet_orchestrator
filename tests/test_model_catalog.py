@@ -82,6 +82,17 @@ def test_served_matches():
     assert _served_matches("anything", {})           # no id -> trust static mapping
 
 
+def test_served_match_ignores_backend_and_tensor_parallel_suffixes():
+    """Two Saber TP2 presets are different models, not a fuzzy ID match."""
+    assert not _served_matches(
+        "ripple-65b-saber-tp2",
+        {"served_id": "qwen38-flashnext-saber-tp2"})
+    assert not _served_matches(
+        "ripple-65b-saber-tp2", {"served_id": "occamy-fp8-saber-tp2"})
+    assert _served_matches(
+        "ripple-65b-saber-tp2", {"served_id": "ripple-65b-saber-tp2"})
+
+
 def test_archived_presets_never_route_or_serve(monkeypatch):
     """Archived = shelved: tag routing skips it, model.use refuses it, and
     model.list marks it — the retired-model state that keeps a full catalog

@@ -56,9 +56,14 @@ _ROUTING_SLOTS = ("specialist", "specialist2", "specialist3")
 
 
 def preferred_brain(config: dict) -> dict:
-    """First allowed, active brain preset in catalog priority order."""
+    """The assigned brain slot, then the first active brain alias in catalog order."""
     from runtime.preset_store import preset_allowed
-    presets = ((config.get("models") or {}).get("presets") or {})
+    models = config.get("models") or {}
+    presets = models.get("presets") or {}
+    assigned = str((models.get("slots") or {}).get("brain") or "")
+    p = presets.get(assigned) or {}
+    if p and not p.get("archived") and preset_allowed(config, assigned):
+        return {"preset": assigned, "alias": "local-orchestrator"}
     for name, p in presets.items():
         if p.get("alias") == "local-orchestrator" and not p.get("archived") \
                 and preset_allowed(config, name):
@@ -325,7 +330,9 @@ def _served_matches(mid: str | None, p: dict) -> bool:
     sid_tokens = set(re.split(r'[-_./]', sid))
     mid_tokens = set(re.split(r'[-_./]', m))
     # Remove trivially common tokens
-    noise = {"gguf", "q4", "q5", "q6", "q8", "f16", "bf16", "fp16", "k", "m", "s", "xs", ""}
+    noise = {"gguf", "q4", "q5", "q6", "q8", "f16", "bf16", "fp16",
+             "k", "m", "s", "xs", "", "llama", "llamacpp", "vllm",
+             "radiance", "saber", "rocm", "cpu", "tp1", "tp2", "tp4"}
     sig_sid = sid_tokens - noise
     sig_mid = mid_tokens - noise
     if sig_sid and sig_sid.issubset(sig_mid):
@@ -383,7 +390,11 @@ async def live_slot(config: dict, gpu: str | None = None,
     counts as present on both). Returns {preset, serving, strengths, alias},
     or None when the port is down or the served model matches no preset.
     TTL-cached (~120s), cheap, and never raises — a probe failure is just None.
+    An explicitly empty slot is disabled, not an invitation to probe its GPU.
     """
+    slots = ((config.get("models") or {}).get("slots") or {})
+    if gpu is None and slot in slots and not slots[slot]:
+        return None
     key = f"gpu:{gpu}" if gpu is not None else f"slot:{slot}"
     hit = _live_slot_cache.get(key)
     now = time.monotonic()

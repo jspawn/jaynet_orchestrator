@@ -315,7 +315,7 @@ def render(config: dict) -> str:
                 "model": f"openai/{p.get('served_id') or alias}",
                 "api_base": api_base,
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
-                "max_tokens": 131072,
+                "max_tokens": 8192,
                 # Response cache off for local aliases (audit 2026-09-23 #2):
                 # llama.cpp's prompt cache covers the useful part, and cached
                 # replays fake unanimity in council.vote / judge re-grades.
@@ -341,7 +341,7 @@ def render(config: dict) -> str:
                 "model": f"openai/{p.get('served_id') or alias}",
                 "api_base": api_base,
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
-                "max_tokens": 131072,
+                "max_tokens": 8192,
                 "cache": {"no-cache": True, "no-store": True},  # see above
             }})
 
@@ -364,7 +364,7 @@ def render(config: dict) -> str:
                 "model": f"openai/{p.get('served_id') or p.get('alias')}",
                 "api_base": api_base,
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
-                "max_tokens": 131072,
+                "max_tokens": 8192,
                 "cache": {"no-cache": True, "no-store": True},
             }})
 

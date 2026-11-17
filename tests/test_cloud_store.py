@@ -404,6 +404,9 @@ def test_render_empty_specialist_falls_back_to_brain(tmp_path, monkeypatch):
     assert by_name["local-orchestrator"]["api_base"] == "http://127.0.0.1:8090/v1"
     assert by_name["local-specialist"]["api_base"] == "http://127.0.0.1:8090/v1"
     assert by_name["local-specialist"]["model"] == "openai/brain-id"
+    # This is a completion default, not the model's context size. A 128K
+    # default leaves no room for input on a 128K model when no cap is sent.
+    assert by_name["local-specialist"]["max_tokens"] == 8192
 
 
 def test_render_extra_specialists_only_when_assigned(tmp_path, monkeypatch):

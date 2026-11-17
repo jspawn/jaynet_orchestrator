@@ -128,6 +128,23 @@ def test_live_slot_port_down_returns_none(monkeypatch):
     assert run(catalog.live_slot(CFG)) is None
 
 
+def test_live_slot_empty_slot_does_not_probe_gpu_fallback(monkeypatch):
+    _probe(monkeypatch, "unrelated-model")
+    cfg = {"models": {"slots": {"specialist": ""}, "presets": {
+        "unrelated": {"alias": "local-specialist", "port": 8080, "gpu": "1"},
+    }}}
+    assert run(catalog.live_slot(cfg)) is None
+
+
+def test_preferred_brain_uses_assigned_slot_even_with_specialist_alias():
+    cfg = {"models": {"slots": {"brain": "ripple"}, "presets": {
+        "old-brain": {"alias": "local-orchestrator"},
+        "ripple": {"alias": "local-specialist"},
+    }}}
+    assert catalog.preferred_brain(cfg) == {
+        "preset": "ripple", "alias": "local-orchestrator"}
+
+
 def test_live_slot_split_preset_visible_on_both_cards(monkeypatch):
     """A preset on "0,1" (layer split) counts as live on GPU 0 AND GPU 1."""
     _probe(monkeypatch, "qwen3.6-27b-davidau")
