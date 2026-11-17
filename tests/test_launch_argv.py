@@ -240,10 +240,14 @@ def _ripple_conf(tmp_path):
 
 def test_saber_ripple_maps_tp2_packs_checkpoint_and_loopback(tmp_path):
     conf = _ripple_conf(tmp_path)
+    repo = tmp_path / "ripple-repo"
+    repo.mkdir()
+    conf["SABER_REPO"] = str(repo)
     argv, env, warns = build_argv(
         "saber", conf, **_kwargs(gpu="0,1", alias="ripple-65b-saber-tp2"))
     assert argv == ["/bin/x"]
     assert env["SABER_MODEL"] == "ripple"
+    assert env["SABER_REPO"] == str(repo)
     assert env["RIPPLE_PACK"] == conf["MODEL_PATH"]
     assert env["RIPPLE_DRAFT"] == conf["MTP_MODEL"]
     assert env["RIPPLE_CHECKPOINT"] == conf["RIPPLE_CHECKPOINT"]

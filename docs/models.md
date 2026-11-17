@@ -305,7 +305,10 @@ Ripple-65B Preview uses a Ripple-capable Saber checkout, TP=2 and
 `SABER_MODEL=ripple`. The reference `specialist-ripple-65b-saber-tp2.conf`
 maps `MODEL_PATH` to the MXFP4 target pack, `MTP_MODEL` to the FP8 DFlash2 pack,
 and `RIPPLE_CHECKPOINT` to the NVFP4 checkpoint. Set `SABER_REPO` when the
-registered lifecycle wrapper's default checkout is not the Ripple fork. The
+registered lifecycle wrapper's default checkout is not the Ripple fork. If an
+existing Saber install's lifecycle predates Ripple, either rebuild it or
+register `$JAYNET_HOME/scripts/saber-serve.sh` as a separate `saber` binary and
+select that binary on the Ripple preset. The
 server is text-only, runs one request at a time with queued clients, supports
 128K context and OpenAI tool calling, and binds loopback by default. Use
 `caps: {vision: false, thinking: true}` and `profile.system_first: true`;

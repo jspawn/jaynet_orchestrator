@@ -118,8 +118,11 @@ def _saber_ripple_env(conf: dict[str, str], cards: list[str], *, host: str,
     model = (conf.get("MODEL_PATH") or "").strip()
     draft = (conf.get("MTP_MODEL") or "").strip()
     checkpoint = (conf.get("RIPPLE_CHECKPOINT") or "").strip()
+    repo = (conf.get("SABER_REPO") or "").strip()
     if not draft or not checkpoint:
         raise ValueError("saber Ripple needs MTP_MODEL and RIPPLE_CHECKPOINT")
+    if repo and not os.path.isdir(repo):
+        raise ValueError(f"saber Ripple repository not found: {repo}")
     for pack in (model, draft):
         if not os.path.isdir(pack):
             raise ValueError(f"saber Ripple pack directory not found: {pack}")
@@ -139,6 +142,8 @@ def _saber_ripple_env(conf: dict[str, str], cards: list[str], *, host: str,
         "RIPPLE_CHECKPOINT": checkpoint, "SERVED_NAME": alias or "Ripple-65B-Preview",
         "CNAME": f"saber-jaynet-{port}", "HIP_DEVICES": ",".join(cards),
     }
+    if repo:
+        env["SABER_REPO"] = repo
     if conf.get("CTX_SIZE"):
         env["MAX_CTX"] = conf["CTX_SIZE"]
     return env
