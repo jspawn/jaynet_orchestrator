@@ -297,7 +297,19 @@ to the BF16 packs and `OCCAMY_CHECKPOINT` to the BF16 checkpoint. Set
 `SABER_REPO` and `SABER_BIN` for the fork. `MTP_MODEL` is the optional official
 BF16 head; `SPEC_DRAFT_N_MAX=1` selects its fastest validated greedy depth and
 requires `MAX_NUM_SEQS=1`. This path is text-only, supports full 262K context,
-and binds loopback by default through `scripts/saber-occamy-native.sh`.
+and binds loopback by default through `scripts/saber-occamy-native.sh`. Set
+`profile.system_first: true`: its strict template accepts system text only at
+index 0. Qwen3 reasoning and XML tool-call parsing are enabled by the server.
+
+Ripple-65B Preview uses a Ripple-capable Saber checkout, TP=2 and
+`SABER_MODEL=ripple`. The reference `specialist-ripple-65b-saber-tp2.conf`
+maps `MODEL_PATH` to the MXFP4 target pack, `MTP_MODEL` to the FP8 DFlash2 pack,
+and `RIPPLE_CHECKPOINT` to the NVFP4 checkpoint. Set `SABER_REPO` when the
+registered lifecycle wrapper's default checkout is not the Ripple fork. The
+server is text-only, runs one request at a time with queued clients, supports
+128K context and OpenAI tool calling, and binds loopback by default. Use
+`caps: {vision: false, thinking: true}` and `profile.system_first: true`;
+its reference sampling is deterministic (`temperature: 0.0`).
 
 ## External embed / rerank endpoints
 

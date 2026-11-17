@@ -110,6 +110,40 @@ def _saber_occamy_env(conf: dict[str, str], cards: list[str], *, host: str,
     return env
 
 
+def _saber_ripple_env(conf: dict[str, str], cards: list[str], *, host: str,
+                      port: str, alias: str) -> dict[str, str]:
+    """Validate the Ripple fork's TP2 packs and render its launcher env."""
+    if len(cards) != 2:
+        raise ValueError("saber Ripple needs two GPUs (TP=2)")
+    model = (conf.get("MODEL_PATH") or "").strip()
+    draft = (conf.get("MTP_MODEL") or "").strip()
+    checkpoint = (conf.get("RIPPLE_CHECKPOINT") or "").strip()
+    if not draft or not checkpoint:
+        raise ValueError("saber Ripple needs MTP_MODEL and RIPPLE_CHECKPOINT")
+    for pack in (model, draft):
+        if not os.path.isdir(pack):
+            raise ValueError(f"saber Ripple pack directory not found: {pack}")
+        for relative in ("manifest.json", "rank0.pack", "rank1.pack"):
+            if not os.path.isfile(os.path.join(pack, relative)):
+                raise ValueError(f"saber Ripple pack file not found: {pack}/{relative}")
+    if not os.path.isdir(checkpoint):
+        raise ValueError(f"saber Ripple checkpoint not found: {checkpoint}")
+    for relative in ("config.json", "tokenizer.json", "chat_template.jinja"):
+        if not os.path.isfile(os.path.join(checkpoint, relative)):
+            raise ValueError(f"saber Ripple checkpoint file not found: {checkpoint}/{relative}")
+    if (conf.get("MAX_NUM_SEQS") or "1") != "1":
+        raise ValueError("saber Ripple currently serves one request at a time")
+    env = {
+        "PORT": str(port), "HOST": host, "SABER_MODEL": "ripple",
+        "RIPPLE_PACK": model, "RIPPLE_DRAFT": draft,
+        "RIPPLE_CHECKPOINT": checkpoint, "SERVED_NAME": alias or "Ripple-65B-Preview",
+        "CNAME": f"saber-jaynet-{port}", "HIP_DEVICES": ",".join(cards),
+    }
+    if conf.get("CTX_SIZE"):
+        env["MAX_CTX"] = conf["CTX_SIZE"]
+    return env
+
+
 def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
                port: str, alias: str) -> dict[str, str]:
     """Validate a managed Saber pack and render its native launcher's env."""
@@ -135,6 +169,9 @@ def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
         if conf.get("CTX_SIZE"):
             env["MAX_CTX"] = conf["CTX_SIZE"]
         return env
+
+    if conf.get("SABER_MODEL") == "ripple":
+        return _saber_ripple_env(conf, cards, host=host, port=port, alias=alias)
 
     if len(cards) not in (1, 2):
         raise ValueError("saber 27B needs one GPU (TP=1) or two GPUs (TP=2)")

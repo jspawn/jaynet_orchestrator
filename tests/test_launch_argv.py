@@ -222,6 +222,51 @@ def test_saber_flashnext_requires_tp2_and_complete_pack(tmp_path):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
 
 
+def _ripple_conf(tmp_path):
+    target = tmp_path / "packs" / "target"
+    draft = tmp_path / "packs" / "draft"
+    checkpoint = tmp_path / "checkpoint"
+    for pack in (target, draft):
+        pack.mkdir(parents=True)
+        for relative in ("manifest.json", "rank0.pack", "rank1.pack"):
+            (pack / relative).write_text("SBRPACK1")
+    checkpoint.mkdir()
+    for relative in ("config.json", "tokenizer.json", "chat_template.jinja"):
+        (checkpoint / relative).write_text("{}")
+    return {"SABER_MODEL": "ripple", "MODEL_PATH": str(target),
+            "MTP_MODEL": str(draft), "RIPPLE_CHECKPOINT": str(checkpoint),
+            "CTX_SIZE": "131072", "MAX_NUM_SEQS": "1"}
+
+
+def test_saber_ripple_maps_tp2_packs_checkpoint_and_loopback(tmp_path):
+    conf = _ripple_conf(tmp_path)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="ripple-65b-saber-tp2"))
+    assert argv == ["/bin/x"]
+    assert env["SABER_MODEL"] == "ripple"
+    assert env["RIPPLE_PACK"] == conf["MODEL_PATH"]
+    assert env["RIPPLE_DRAFT"] == conf["MTP_MODEL"]
+    assert env["RIPPLE_CHECKPOINT"] == conf["RIPPLE_CHECKPOINT"]
+    assert env["SERVED_NAME"] == "ripple-65b-saber-tp2"
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    assert env["HOST"] == "127.0.0.1" and env["PORT"] == "8090"
+    assert env["MAX_CTX"] == "131072"
+    assert warns == []
+
+
+def test_saber_ripple_requires_tp2_complete_packs_and_one_request(tmp_path):
+    conf = _ripple_conf(tmp_path)
+    with pytest.raises(ValueError, match="two GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1"))
+    conf["MAX_NUM_SEQS"] = "2"
+    with pytest.raises(ValueError, match="one request"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    conf["MAX_NUM_SEQS"] = "1"
+    (tmp_path / "packs" / "draft" / "rank1.pack").unlink()
+    with pytest.raises(ValueError, match="draft/rank1.pack"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+
+
 def _occamy_conf(tmp_path):
     packs = tmp_path / "packs"
     paths = {key: packs / key.lower() for key in
