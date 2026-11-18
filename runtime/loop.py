@@ -1127,10 +1127,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # History-aware stickiness: the last few turns' text joins the keyword
         # matching, bounded so a long chat can't widen the toolset without
         # limit (see _history_hint).
+        from runtime.preset_store import profile_for
+        tool_mode = profile_for(self.config, eff_model).get("tool_selection")
         rs.allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools,
                                        history_hint=_history_hint(
-                                           self.config, history) or None)
+                                           self.config, history) or None,
+                                       mode=tool_mode)
         # Brain-only: under tools.code.brain_mode=verify with a coding
         # specialist present, swap code.run/execute/patch for code.check —
         # implementation routes through specialist.delegate mechanically. The same

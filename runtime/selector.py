@@ -62,7 +62,8 @@ class ToolSelector:
 
     def select(self, user_message: str, requested: list[str] | None = None,
                disabled: set[str] | None = None,
-               history_hint: str | None = None) -> list[str] | None:
+               history_hint: str | None = None,
+               mode: str | None = None) -> list[str] | None:
         """Return a frozen allowlist of tool names, or None meaning 'all tools'.
 
         Called once, before the loop starts. The result is held constant for the
@@ -81,16 +82,18 @@ class ToolSelector:
         turns trying to execute it as shell code).
 
         disabled: globally disabled tools to exclude even in auto mode.
+        mode: optional per-preset override; an explicit allowlist still wins.
         """
         names = [t.name for t in self.registry.all()]
         if disabled:
             names = [n for n in names if n not in disabled]
+        mode = mode or self.mode
 
         if requested is not None:           # explicit allowlist always wins
             allow = self._expand(requested, names)
             chosen_via = "static"
             self._diag = {"via": "static", "requested": requested}
-        elif self.mode == "auto":
+        elif mode == "auto":
             msg = (user_message or "").lower()
             full_hit = next((k for k in self.full_keywords if k in msg), None)
             if full_hit:
@@ -106,11 +109,11 @@ class ToolSelector:
             if disabled:
                 # Returning None here would mean "every tool" downstream, silently
                 # dropping the disabled filter — materialize the set minus disabled.
-                self._diag = {"via": self.mode, "note": "all minus disabled"}
+                self._diag = {"via": mode, "note": "all minus disabled"}
                 log.info("Tool selection (%s): %d/%d tools (disabled filtered)",
-                         self.mode, len(names), len(self.registry.all()))
+                         mode, len(names), len(self.registry.all()))
                 return names
-            self._diag = {"via": self.mode, "note": "no filtering"}
+            self._diag = {"via": mode, "note": "no filtering"}
             return None
 
         # Preserve registry order, drop anything unknown, apply optional cap.

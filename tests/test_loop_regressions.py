@@ -416,6 +416,41 @@ def test_select_none_keeps_auto_mode_behavior():
     assert s.select("please search the web") == ["web.search"]
 
 
+def test_select_preset_all_override_keeps_explicit_allowlist_precedence():
+    s = _sel(["fs.read", "web.search"],
+             {"tool_selection": {"mode": "auto",
+                                 "keyword_namespaces": {"web": ["search"]}}})
+    assert s.select("please search the web", mode="all") is None
+    assert s.select("please search the web", requested=["fs.read"],
+                    mode="all") == ["fs.read"]
+
+
+def test_select_preset_all_override_respects_disabled():
+    s = _sel(["fs.read", "web.search"], {"tool_selection": {"mode": "auto"}})
+    assert s.select("hi", disabled={"web.search"}, mode="all") == ["fs.read"]
+
+
+def test_loop_uses_active_preset_tool_selection_override():
+    reg = _Registry(["fs.read", "web.search"])
+    rt, _ = _runtime(reg, [_final("ok")])
+    rt.config["tool_selection"] = {
+        "mode": "auto", "keyword_namespaces": {"web": ["search"]},
+    }
+    rt.config["models"] = {"presets": {"ripple": {
+        "alias": "local-orchestrator", "profile": {"tool_selection": "all"},
+    }}}
+    rt.selector = ToolSelector(reg, rt.config)
+    events = []
+
+    async def on_event(event):
+        events.append(event)
+
+    asyncio.run(rt.run("please search", on_event=on_event))
+    selected = next(e for e in events if e["type"] == "tool_selection")
+    assert selected["data"]["selected"] == "all"
+    assert set(selected["data"]["available"]) == {"fs.read", "web.search"}
+
+
 def test_select_auto_empty_still_falls_back_to_all():
     # Auto selecting nothing (trivial message, no core/keyword match) still
     # degrades to 'all' — only EXPLICIT lists stopped falling back.

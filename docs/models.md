@@ -311,8 +311,11 @@ register `$JAYNET_HOME/scripts/saber-serve.sh` as a separate `saber` binary and
 select that binary on the Ripple preset. The
 server is text-only, runs one request at a time with queued clients, supports
 128K context and OpenAI tool calling, and binds loopback by default. Use
-`caps: {vision: false, thinking: true}` and `profile.system_first: true`;
-its reference sampling is deterministic (`temperature: 0.0`).
+`caps: {vision: false, thinking: true}`, `profile.system_first: false`, and
+`profile.tool_selection: "all"`. Its template accepts trailing system messages;
+keeping volatile notes trailing and tool schemas stable preserves the prompt
+prefix across runs. Explicit caller tool allowlists still take precedence. Its
+reference sampling is deterministic (`temperature: 0.0`).
 
 ## External embed / rerank endpoints
 
