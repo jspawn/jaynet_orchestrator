@@ -317,6 +317,18 @@ keeping volatile notes trailing and tool schemas stable preserves the prompt
 prefix across runs. Explicit caller tool allowlists still take precedence. Its
 reference sampling is deterministic (`temperature: 0.0`).
 
+Kolibri-1 uses the Kolibri-capable Saber fork, TP=2 and
+`SABER_MODEL=kolibri`. The reference `brain-kolibri-1-saber-tp2.conf` and
+`specialist-kolibri-1-saber-tp2.conf` map `MODEL_PATH` to the MXFP4 TP2 pack
+and `KOLIBRI_CHECKPOINT` to the BF16 checkpoint; set `SABER_REPO` in the live
+catalog. The text-only server queues concurrent clients, supports 262K context
+and OpenAI tool calling, and binds loopback by default. Its template accepts
+trailing system messages, so use `profile.system_first: false` and
+`profile.tool_selection: "all"` to preserve the exact-prefix cache. Use
+`think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the official
+sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`). A full
+256K prompt and long-context retrieval quality remain unvalidated.
+
 ## External embed / rerank endpoints
 
 The RAG tools talk to plain URLs (`tools.rag.embed_url` /

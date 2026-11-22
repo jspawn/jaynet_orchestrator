@@ -149,12 +149,49 @@ def _saber_ripple_env(conf: dict[str, str], cards: list[str], *, host: str,
     return env
 
 
+def _saber_kolibri_env(conf: dict[str, str], cards: list[str], *, host: str,
+                       port: str, alias: str) -> dict[str, str]:
+    """Validate the Kolibri fork's TP2 pack and render its launcher env."""
+    if len(cards) != 2:
+        raise ValueError("saber Kolibri needs two GPUs (TP=2)")
+    model = (conf.get("MODEL_PATH") or "").strip()
+    checkpoint = (conf.get("KOLIBRI_CHECKPOINT") or "").strip()
+    repo = (conf.get("SABER_REPO") or "").strip()
+    if repo and not os.path.isdir(repo):
+        raise ValueError(f"saber Kolibri repository not found: {repo}")
+    if not os.path.isdir(model):
+        raise ValueError(f"saber Kolibri pack directory not found: {model}")
+    for relative in ("manifest.json", "rank0.pack", "rank1.pack"):
+        if not os.path.isfile(os.path.join(model, relative)):
+            raise ValueError(f"saber Kolibri pack file not found: {model}/{relative}")
+    if not os.path.isdir(checkpoint):
+        raise ValueError(f"saber Kolibri checkpoint not found: {checkpoint}")
+    for relative in ("config.json", "tokenizer.json", "chat_template.jinja"):
+        if not os.path.isfile(os.path.join(checkpoint, relative)):
+            raise ValueError(f"saber Kolibri checkpoint file not found: {checkpoint}/{relative}")
+    if (conf.get("MAX_NUM_SEQS") or "1") != "1":
+        raise ValueError("saber Kolibri currently serves one request at a time")
+    env = {
+        "PORT": str(port), "HOST": host, "SABER_MODEL": "kolibri",
+        "KOLIBRI_PACK": model, "KOLIBRI_CHECKPOINT": checkpoint,
+        "SERVED_NAME": alias or "Kolibri-1", "CNAME": f"saber-jaynet-{port}",
+        "HIP_DEVICES": ",".join(cards), "MAX_ROWS": conf.get("MAX_ROWS") or "16",
+    }
+    if repo:
+        env["SABER_REPO"] = repo
+    if conf.get("CTX_SIZE"):
+        env["MAX_CTX"] = conf["CTX_SIZE"]
+    return env
+
+
 def _saber_env(conf: dict[str, str], cards: list[str], *, host: str,
                port: str, alias: str) -> dict[str, str]:
     """Validate a managed Saber pack and render its native launcher's env."""
     model = (conf.get("MODEL_PATH") or "").strip()
     if conf.get("SABER_MODEL") == "occamy":
         return _saber_occamy_env(conf, cards, host=host, port=port, alias=alias)
+    if conf.get("SABER_MODEL") == "kolibri":
+        return _saber_kolibri_env(conf, cards, host=host, port=port, alias=alias)
 
     if conf.get("SABER_MODEL") == "flashnext":
         if len(cards) != 2:

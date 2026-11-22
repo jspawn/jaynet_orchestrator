@@ -23,6 +23,8 @@ elif [[ "$SABER_MODEL" == ripple ]]; then
     if [[ ! -x "$NATIVE_LAUNCHER" && -n "${JAYNET_HOME:-${ORCH_HOME:-}}" ]]; then
         NATIVE_LAUNCHER="${JAYNET_HOME:-${ORCH_HOME}}/scripts/saber-ripple-native.sh"
     fi
+elif [[ "$SABER_MODEL" == kolibri ]]; then
+    NATIVE_LAUNCHER="${SABER_KOLIBRI_LAUNCHER:-$SABER_REPO/tools/kolibri_serve_native.sh}"
 fi
 RUNTIME="${SABER_RUNTIME:-auto}"
 if [[ "$RUNTIME" != auto && "$RUNTIME" != native && "$RUNTIME" != container ]]; then
@@ -31,7 +33,7 @@ if [[ "$RUNTIME" != auto && "$RUNTIME" != native && "$RUNTIME" != container ]]; 
 fi
 
 TP_ARGS=()
-if [[ "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple ]]; then
+if [[ "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri ]]; then
     [[ "${HIP_DEVICES:-}" =~ ^[0-9]+,[0-9]+$ ]] \
         || { echo "saber: $SABER_MODEL needs HIP_DEVICES=<card,card> (TP=2)" >&2; exit 1; }
 elif [[ -n "${DEVICE:-}" ]]; then
@@ -74,7 +76,7 @@ if [[ "$RUNTIME" != container && -x "$NATIVE_LAUNCHER" ]]; then
     rc=$?
     exit "$rc"
 fi
-if [[ "$RUNTIME" == native || "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple ]]; then
+if [[ "$RUNTIME" == native || "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri ]]; then
     echo "saber: native launcher not executable: $NATIVE_LAUNCHER" >&2
     exit 1
 fi

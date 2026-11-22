@@ -271,6 +271,52 @@ def test_saber_ripple_requires_tp2_complete_packs_and_one_request(tmp_path):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
 
 
+def _kolibri_conf(tmp_path):
+    pack = tmp_path / "pack"
+    checkpoint = tmp_path / "checkpoint"
+    pack.mkdir()
+    for relative in ("manifest.json", "rank0.pack", "rank1.pack"):
+        (pack / relative).write_text("SBRPACK1")
+    checkpoint.mkdir()
+    for relative in ("config.json", "tokenizer.json", "chat_template.jinja"):
+        (checkpoint / relative).write_text("{}")
+    return {"SABER_MODEL": "kolibri", "MODEL_PATH": str(pack),
+            "KOLIBRI_CHECKPOINT": str(checkpoint), "CTX_SIZE": "262144",
+            "MAX_ROWS": "16", "MAX_NUM_SEQS": "1"}
+
+
+def test_saber_kolibri_maps_tp2_pack_checkpoint_and_loopback(tmp_path):
+    conf = _kolibri_conf(tmp_path)
+    repo = tmp_path / "kolibri-repo"
+    repo.mkdir()
+    conf["SABER_REPO"] = str(repo)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="kolibri-1-saber-tp2"))
+    assert argv == ["/bin/x"]
+    assert env["SABER_MODEL"] == "kolibri"
+    assert env["SABER_REPO"] == str(repo)
+    assert env["KOLIBRI_PACK"] == conf["MODEL_PATH"]
+    assert env["KOLIBRI_CHECKPOINT"] == conf["KOLIBRI_CHECKPOINT"]
+    assert env["SERVED_NAME"] == "kolibri-1-saber-tp2"
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    assert env["HOST"] == "127.0.0.1" and env["PORT"] == "8090"
+    assert env["MAX_CTX"] == "262144" and env["MAX_ROWS"] == "16"
+    assert warns == []
+
+
+def test_saber_kolibri_requires_tp2_complete_pack_and_one_request(tmp_path):
+    conf = _kolibri_conf(tmp_path)
+    with pytest.raises(ValueError, match="two GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1"))
+    conf["MAX_NUM_SEQS"] = "2"
+    with pytest.raises(ValueError, match="one request"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    conf["MAX_NUM_SEQS"] = "1"
+    (tmp_path / "pack" / "rank1.pack").unlink()
+    with pytest.raises(ValueError, match="rank1.pack"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+
+
 def _occamy_conf(tmp_path):
     packs = tmp_path / "packs"
     paths = {key: packs / key.lower() for key in
