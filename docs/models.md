@@ -312,10 +312,10 @@ select that binary on the Ripple preset. The
 server is text-only, runs one request at a time with queued clients, supports
 128K context and OpenAI tool calling, and binds loopback by default. Use
 `caps: {vision: false, thinking: true}`, `profile.system_first: false`, and
-`profile.tool_selection: "all"`. Its template accepts trailing system messages;
-keeping volatile notes trailing and tool schemas stable preserves the prompt
-prefix across runs. Explicit caller tool allowlists still take precedence. Its
-reference sampling is deterministic (`temperature: 0.0`).
+`profile.tool_selection: "auto"`. Its template accepts trailing system messages;
+automatic selection bounds cold prefill and stays fixed within each run.
+Explicit caller tool allowlists still take precedence. Its reference sampling
+is deterministic (`temperature: 0.0`).
 
 Kolibri-1 uses the Kolibri-capable Saber fork, TP=2 and
 `SABER_MODEL=kolibri`. The reference `brain-kolibri-1-saber-tp2.conf` and
@@ -323,11 +323,12 @@ Kolibri-1 uses the Kolibri-capable Saber fork, TP=2 and
 and `KOLIBRI_CHECKPOINT` to the BF16 checkpoint; set `SABER_REPO` in the live
 catalog. The text-only server queues concurrent clients, supports 262K context
 and OpenAI tool calling, and binds loopback by default. Its template accepts
-trailing system messages, so use `profile.system_first: false` and
-`profile.tool_selection: "all"` to preserve the exact-prefix cache. Use
-`think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the official
-sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`). A full
-256K prompt and long-context retrieval quality remain unvalidated.
+trailing system messages, so use `profile.system_first: false`. Use
+`profile.tool_selection: "auto"`: exposing every tool makes even short chats
+~43K-token prompts and trips the 180-second stall guard during cold prefill.
+Use `think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the
+official sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`).
+A full 256K prompt and long-context retrieval quality remain unvalidated.
 
 ## External embed / rerank endpoints
 
