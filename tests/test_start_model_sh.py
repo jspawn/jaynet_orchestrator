@@ -114,6 +114,24 @@ def test_split_mode_layer_explicit_override(tmp_path):
     assert "--split-mode layer" in r.stdout
 
 
+def test_gpu_mmproj_enforces_min_ubatch(tmp_path):
+    mmproj = _write(tmp_path / "mmproj.gguf", "x")
+    conf = _conf(tmp_path, f"MMPROJ={mmproj}\nMMPROJ_OFFLOAD=on\nUBATCH_SIZE=128\n")
+    _, r = _run(["--preset", conf, "-d"], {}, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "--ubatch-size 512" in r.stdout
+    assert "--no-mmproj-offload" not in r.stdout
+
+
+def test_cpu_mmproj_preserves_small_ubatch(tmp_path):
+    mmproj = _write(tmp_path / "mmproj.gguf", "x")
+    conf = _conf(tmp_path, f"MMPROJ={mmproj}\nMMPROJ_OFFLOAD=off\nUBATCH_SIZE=128\n")
+    _, r = _run(["--preset", conf, "-d"], {}, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "--no-mmproj-offload" in r.stdout
+    assert "--ubatch-size 128" in r.stdout
+
+
 def test_mmap_off_emits_load_mode_none(tmp_path):
     """MMAP=off (ROCm slow/hanging mmap loads): current binaries take
     --load-mode none; older ones --no-mmap — the script probes --help."""

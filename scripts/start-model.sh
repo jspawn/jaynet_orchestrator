@@ -245,7 +245,8 @@ if [[ -n "$MMPROJ" && "$MMPROJ" != "none" ]]; then
     if [[ -f "$MMPROJ" ]]; then
         VISION_FLAGS=(--mmproj "$MMPROJ")
         [[ "$MMPROJ_OFFLOAD" == "off" ]] && VISION_FLAGS+=(--no-mmproj-offload)
-        [[ "${UBATCH_SIZE:-0}" -lt 512 ]] 2>/dev/null && UBATCH_SIZE="512"
+        # GPU vision needs larger batches; CPU projection keeps the preset's VRAM bound.
+        [[ "$MMPROJ_OFFLOAD" != "off" && "${UBATCH_SIZE:-0}" -lt 512 ]] 2>/dev/null && UBATCH_SIZE="512"
     else
         echo "Warning: MMPROJ not found: $MMPROJ — running text-only." >&2
     fi
