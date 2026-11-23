@@ -282,7 +282,7 @@ def _kolibri_conf(tmp_path):
         (checkpoint / relative).write_text("{}")
     return {"SABER_MODEL": "kolibri", "MODEL_PATH": str(pack),
             "KOLIBRI_CHECKPOINT": str(checkpoint), "CTX_SIZE": "262144",
-            "MAX_ROWS": "16", "MAX_NUM_SEQS": "1"}
+            "MAX_ROWS": "256", "MAX_NUM_SEQS": "1"}
 
 
 def test_saber_kolibri_maps_tp2_pack_checkpoint_and_loopback(tmp_path):
@@ -300,8 +300,11 @@ def test_saber_kolibri_maps_tp2_pack_checkpoint_and_loopback(tmp_path):
     assert env["SERVED_NAME"] == "kolibri-1-saber-tp2"
     assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
     assert env["HOST"] == "127.0.0.1" and env["PORT"] == "8090"
-    assert env["MAX_CTX"] == "262144" and env["MAX_ROWS"] == "16"
+    assert env["MAX_CTX"] == "262144" and env["MAX_ROWS"] == "256"
     assert warns == []
+    del conf["MAX_ROWS"]
+    _, env, _ = build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    assert env["MAX_ROWS"] == "256"
 
 
 def test_saber_kolibri_requires_tp2_complete_pack_and_one_request(tmp_path):

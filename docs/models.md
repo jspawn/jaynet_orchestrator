@@ -322,13 +322,14 @@ Kolibri-1 uses the Kolibri-capable Saber fork, TP=2 and
 `specialist-kolibri-1-saber-tp2.conf` map `MODEL_PATH` to the MXFP4 TP2 pack
 and `KOLIBRI_CHECKPOINT` to the BF16 checkpoint; set `SABER_REPO` in the live
 catalog. The text-only server queues concurrent clients, supports 262K context
-and OpenAI tool calling, and binds loopback by default. Its template accepts
-trailing system messages, so use `profile.system_first: false`. Use
-`profile.tool_selection: "auto"`: exposing every tool makes even short chats
-~43K-token prompts and trips the 180-second stall guard during cold prefill.
-Use `think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the
-official sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`).
-A full 256K prompt and long-context retrieval quality remain unvalidated.
+and OpenAI tool calling, and binds loopback by default. Keep `MAX_ROWS=256` for
+the optimized prefill kernel; the validated 128K cold prefill takes about 70
+seconds. Its template accepts trailing system messages, so use
+`profile.system_first: false`. Use `profile.tool_selection: "auto"` to avoid
+unnecessary schema tokens while keeping the toolset fixed within each run. Use
+`think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the official
+sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`). A full
+256K prompt and long-context retrieval quality remain unvalidated.
 
 ## External embed / rerank endpoints
 

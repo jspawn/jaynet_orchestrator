@@ -175,7 +175,7 @@ def _saber_kolibri_env(conf: dict[str, str], cards: list[str], *, host: str,
         "PORT": str(port), "HOST": host, "SABER_MODEL": "kolibri",
         "KOLIBRI_PACK": model, "KOLIBRI_CHECKPOINT": checkpoint,
         "SERVED_NAME": alias or "Kolibri-1", "CNAME": f"saber-jaynet-{port}",
-        "HIP_DEVICES": ",".join(cards), "MAX_ROWS": conf.get("MAX_ROWS") or "16",
+        "HIP_DEVICES": ",".join(cards), "MAX_ROWS": conf.get("MAX_ROWS") or "256",
     }
     if repo:
         env["SABER_REPO"] = repo
