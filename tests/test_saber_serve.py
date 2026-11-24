@@ -237,6 +237,26 @@ printf 'kolibri:%s\\n' "$*" >> "$FAKE_LOG"
     assert "--tp" not in log.read_text()
 
 
+def test_saber_daisyrose_uses_native_launcher_without_27b_tp_args(tmp_path):
+    repo, bindir = _fake_native(tmp_path)
+    native = repo / "tools" / "serve_daisyrose_native.sh"
+    native.write_text("""#!/usr/bin/env bash
+HOST=${HOST:-127.0.0.1}
+set -u
+printf 'daisyrose:%s\\n' "$*" >> "$FAKE_LOG"
+""")
+    native.chmod(0o755)
+    env, log = _env(tmp_path, repo, bindir)
+    env.update({"SABER_RUNTIME": "native", "SABER_MODEL": "daisyrose",
+                "HIP_DEVICES": "0,1"})
+    result = subprocess.run(
+        [str(SCRIPT), "--engine-budget-mib", "30500"], env=env,
+        capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert "daisyrose:--no-build --engine-budget-mib 30500" in log.read_text()
+    assert "--tp" not in log.read_text()
+
+
 def test_build_tools_default_native_and_keep_container_fallback():
     build = (Path(__file__).parents[1] / "scripts" / "build_tools.sh").read_text()
     assert 'local mode="${SABER_BUILD:-native}"' in build

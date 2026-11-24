@@ -320,6 +320,56 @@ def test_saber_kolibri_requires_tp2_complete_pack_and_one_request(tmp_path):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
 
 
+def _daisyrose_conf(tmp_path):
+    pack = tmp_path / "pack"
+    checkpoint = tmp_path / "checkpoint"
+    pack.mkdir()
+    for relative in ("manifest.json", "rank0.pack", "rank1.pack"):
+        (pack / relative).write_text("SBRPACK1")
+    checkpoint.mkdir()
+    for relative in ("config.json", "tokenizer.json", "chat_template.jinja"):
+        (checkpoint / relative).write_text("{}")
+    return {"SABER_MODEL": "daisyrose", "MODEL_PATH": str(pack),
+            "DAISY_CHECKPOINT": str(checkpoint), "CTX_SIZE": "262144",
+            "MAX_NUM_SEQS": "1"}
+
+
+def test_saber_daisyrose_maps_tp2_pack_checkpoint_and_loopback(tmp_path):
+    conf = _daisyrose_conf(tmp_path)
+    repo = tmp_path / "daisyrose-repo"
+    repo.mkdir()
+    binary = repo / "saber"
+    binary.write_text("")
+    conf["SABER_REPO"] = str(repo)
+    conf["SABER_BIN"] = str(binary)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="daisyrose-27b-saber-tp2"))
+    assert argv == ["/bin/x"]
+    assert env["SABER_MODEL"] == "daisyrose"
+    assert env["SABER_REPO"] == str(repo)
+    assert env["SABER_BIN"] == str(binary)
+    assert env["DAISY_PACK"] == conf["MODEL_PATH"]
+    assert env["DAISY_CHECKPOINT"] == conf["DAISY_CHECKPOINT"]
+    assert env["SERVED_NAME"] == "daisyrose-27b-saber-tp2"
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    assert env["HOST"] == "127.0.0.1" and env["PORT"] == "8090"
+    assert env["MAX_CTX"] == "262144" and env["MAX_SEQS"] == "1"
+    assert warns == []
+
+
+def test_saber_daisyrose_requires_tp2_complete_pack_and_one_request(tmp_path):
+    conf = _daisyrose_conf(tmp_path)
+    with pytest.raises(ValueError, match="two GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1"))
+    conf["MAX_NUM_SEQS"] = "2"
+    with pytest.raises(ValueError, match="one request"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+    conf["MAX_NUM_SEQS"] = "1"
+    (tmp_path / "pack" / "rank1.pack").unlink()
+    with pytest.raises(ValueError, match="rank1.pack"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+
+
 def _occamy_conf(tmp_path):
     packs = tmp_path / "packs"
     paths = {key: packs / key.lower() for key in
