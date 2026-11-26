@@ -224,6 +224,30 @@ def _vllm_stats_from_metrics(v: dict) -> dict:
     return st
 
 
+def _saber_stats_from_metrics(v: dict) -> dict:
+    """Map Saber's histograms onto the process-card uptime averages.
+
+    Decode uses inverse mean inter-token latency. Prefill is approximate:
+    fresh prompt rows / TTFT (which also includes queueing and first-token
+    overhead). Fresh rows exclude cached prompt tokens when available.
+    """
+    st: dict = {}
+    itl_sum = v.get("saber:inter_token_latency_seconds_sum", 0.0)
+    itl_n = v.get("saber:inter_token_latency_seconds_count", 0.0)
+    if itl_sum > 0 and itl_n > 0:
+        st["gen_tps_avg"] = round(itl_n / itl_sum, 1)
+    ttft_sum = v.get("saber:time_to_first_token_seconds_sum", 0.0)
+    pp_tok = v.get("saber:engine_prefill_live_rows_total",
+                   v.get("saber:prompt_tokens_total", 0.0))
+    if ttft_sum > 0 and pp_tok > 0:
+        st["prompt_tps_avg"] = round(pp_tok / ttft_sum, 1)
+    if "saber:generation_tokens_total" in v:
+        st["tokens_generated"] = int(v["saber:generation_tokens_total"])
+    if "saber:prompt_tokens_total" in v:
+        st["tokens_prompt"] = int(v["saber:prompt_tokens_total"])
+    return st
+
+
 async def _litellm_model_ids(runtime) -> set | None:
     """Aliases the LiteLLM proxy currently serves; None when unreachable."""
     key = os.environ.get("LITELLM_MASTER_KEY", "")

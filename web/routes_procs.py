@@ -49,9 +49,8 @@ async def _read_usage(pid: int, preset: dict, config: dict) -> dict:
 async def _add_server_metrics(st: dict, port: int) -> None:
     """Fill the process-card tok/s + token counters from the server's own
     /metrics (uptime window). llama.cpp speaks llamacpp:* counters with
-    cumulative seconds; vllm/radiance speak labelled vllm:* histograms
-    (mapping in web.server._vllm_stats_from_metrics). A busy/down server
-    keeps the log-parsed stats only."""
+    cumulative seconds; vllm/radiance/saber speak labelled histograms
+    (mappings in web.server). A busy/down server keeps the log-parsed stats."""
     from web import server as _srv  # late: the parsers live there
     try:
         async with httpx.AsyncClient(timeout=1.5) as c:
@@ -60,8 +59,9 @@ async def _add_server_metrics(st: dict, port: int) -> None:
         return
     m = _srv._parse_llama_metrics(r.text)
     if not m:
-        st.update(_srv._vllm_stats_from_metrics(
-            _srv._parse_prom_metrics(r.text, ("vllm:", "radiance:"))))
+        v = _srv._parse_prom_metrics(r.text, ("vllm:", "radiance:", "saber:"))
+        st.update(_srv._vllm_stats_from_metrics(v))
+        st.update(_srv._saber_stats_from_metrics(v))
         return
     gen_tok = m.get("tokens_predicted_total", 0.0)
     gen_s = m.get("tokens_predicted_seconds_total", 0.0)

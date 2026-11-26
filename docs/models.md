@@ -256,80 +256,58 @@ set with the binary dropdown; nothing is rewritten or lost.
 
 ### Saber on R9700
 
-`scripts/build_tools.sh saber rocm` builds the pinned Saber release binary
-natively on the host without downloading weights or starting a server. It
-requires cargo, ROCm HIP/HSA libraries and `AMDGPU_TARGETS=gfx1201`. The old
-container toolchain remains available as `SABER_BUILD=container
-scripts/build_tools.sh saber rocm`. Download exactly the layout the preset
-needs (TP packs are not interchangeable):
+The unified development checkout is `/srv/saber-jaynet-dev` (branch
+`jaynet-integration`). Every Saber preset sets `SABER_REPO` there; model packs
+and checkpoints stay under `/srv/models/saber-models` or their documented
+legacy paths. `scripts/saber-serve.sh` dispatches each `SABER_MODEL` to that
+checkout's own native foreground launcher and translates JayNet's stop SIGTERM
+into a process-group SIGINT. All native servers bind loopback by default.
 
-```bash
-SABER_PACKS=$ORCH_MODELS/saber-packs \
-  ~/jaynet-build/saber-rocm/tools/fetch_packs.sh 27b-tp1  # one card, ~25 GB
-SABER_PACKS=$ORCH_MODELS/saber-packs \
-  ~/jaynet-build/saber-rocm/tools/fetch_packs.sh 27b      # two cards, ~26 GB
-```
+| Family | `SABER_MODEL` | Unified launcher | Notes |
+|---|---|---|---|
+| Qwen3.8 27B | unset/`27b` | `tools/serve_27b_native.sh` | TP1 and TP2 pack layouts are separate |
+| Flash-Next | `flashnext` | `tools/serve_flashnext_native.sh` | TP2, trunk8 pack, no separate DFlash2 |
+| Inkling 2 Mini | `inkling` | `tools/serve_inkling_native.sh` | TP2, text-only with reasoning/tool parsers; 256K/one sequence |
+| DaisyRose | `daisyrose` | `tools/serve_daisyrose_native.sh` | TP2; target-only default, DFlash experimental |
+| Ripple-65B | `ripple` | `tools/ripple_serve_native.sh` | TP2 with its FP8 DFlash2 pack |
+| Kolibri-1 | `kolibri` | `tools/kolibri_serve_native.sh` | TP2, one request at a time |
+| Occamy | `occamy` | `tools/serve_occamy_native.sh` | Experimental compatibility path only |
 
-Register `$BIN_DIR/saber.rocm/bin/saber` as type `saber` with an empty device
-env. The reference presets `specialist-qwen3.8-27b-saber-tp1.conf` and
-`specialist-qwen3.8-27b-saber-tp2.conf` contain the matching pack paths,
-context and concurrency defaults. Native Saber runs in the foreground;
-`scripts/saber-serve.sh` keeps it in a separate process group and translates
-JayNet's stop SIGTERM into Saber's graceful SIGINT. Its workers remain in the
-normal process-tree RAM measurements. The container fallback instead attaches
-to the detached engine and stops only that preset's container; use container
-stats for its engine RAM.
+The `scripts/saber-*-native.sh` files are compatibility wrappers to these
+launchers. Register `scripts/saber-serve.sh` as binary type `saber` with an
+empty device env. The container runtime remains only as an explicit
+`SABER_RUNTIME=container` fallback.
 
-Flash-Next is also managed natively, TP=2 only. Fetch its pack and referenced
-checkpoint with `tools/fetch_packs.sh flashnext`, then use
-`specialist-qwen3.8-flashnext-saber-tp2.conf`. Its `SABER_MODEL=flashnext`
-selects `scripts/saber-flashnext-native.sh`; no separate DFlash2 pack is
-needed. Keep the original checkpoint at the absolute path recorded in the
-pack manifest and PLE index. Set `profile.system_first: true`: its strict chat
-template accepts system text only at index 0, so JayNet merges all system
-directives there. The launcher raises its soft file-descriptor limit to 65536
-for the 131-shard checkpoint. The managed Flash-Next path is native-only.
+Qwen3.8 27B uses `specialist-qwen3.8-27b-saber-tp1.conf` or
+`specialist-qwen3.8-27b-saber-tp2.conf`. TP1 assets currently live under
+`saber-models/saber-packs`; TP2 needs its own two-rank target and DFlash2
+packs. Flash-Next uses `specialist-qwen3.8-flashnext-saber-tp2.conf`; keep the
+checkpoint at the absolute path recorded in its pack manifest and PLE index,
+and use `profile.system_first: true` for its strict template.
 
-Occamy FP8 uses an Occamy-capable Saber architecture fork, two consecutive
-GPUs and `SABER_MODEL=occamy`. The reference `brain-occamy-fp8-saber-tp2.conf`
-maps `MODEL_PATH` to the FP8 routed-expert pack, `OCCAMY_LAYERS`/`OCCAMY_GLOBALS`
-to the BF16 packs and `OCCAMY_CHECKPOINT` to the BF16 checkpoint. Set
-`SABER_REPO` and `SABER_BIN` for the fork. `MTP_MODEL` is the optional official
-BF16 head; `SPEC_DRAFT_N_MAX=1` selects its fastest validated greedy depth and
-requires `MAX_NUM_SEQS=1`. This path is text-only, supports full 262K context,
-and binds loopback by default through `scripts/saber-occamy-native.sh`. Set
-`profile.system_first: true`: its strict template accepts system text only at
-index 0. Qwen3 reasoning and XML tool-call parsing are enabled by the server.
+DaisyRose uses `brain-daisyrose-27b-saber-tp2.conf`, the compatibility
+template `tools/templates/daisyrose_trailing_system.jinja`,
+`profile.system_first: false`, and automatic tool selection with a fixed
+toolset per run. Ripple uses `specialist-ripple-65b-saber-tp2.conf`, the same
+trailing-system profile, 128K context, and deterministic reference sampling.
+Kolibri uses the brain/specialist Kolibri presets, trailing-system profile,
+`MAX_ROWS=256`, and the official sampling defaults. Inkling 2 Mini uses
+`specialist-inkling-2-mini-saber-tp2.conf`, a self-contained pack, loopback,
+256K context and one sequence. Allocation and a real 140,047-token request
+passed at that setting; rank 0 used 25.54 GiB and rank 1 used 18.61 GiB with
+the drafter. Inkling reasoning and tool-call parsing support tool-driven
+delegation and separate `reasoning` output. The 256K preset enables one prefix
+node and disables the drafter to fit it; this configuration uses 22.77 GiB per
+rank. Non-streaming and streaming tools, tool-result follow-up, separated
+reasoning and clean shutdown passed. Cached prompt tokens appear in
+`usage.prompt_tokens_details.cached_tokens`; the cached probe reported 194
+tokens with exact output parity. Its advertised 1M model context is not a
+validated serving limit.
 
-Ripple-65B Preview uses a Ripple-capable Saber checkout, TP=2 and
-`SABER_MODEL=ripple`. The reference `specialist-ripple-65b-saber-tp2.conf`
-maps `MODEL_PATH` to the MXFP4 target pack, `MTP_MODEL` to the FP8 DFlash2 pack,
-and `RIPPLE_CHECKPOINT` to the NVFP4 checkpoint. Set `SABER_REPO` when the
-registered lifecycle wrapper's default checkout is not the Ripple fork. If an
-existing Saber install's lifecycle predates Ripple, either rebuild it or
-register `$JAYNET_HOME/scripts/saber-serve.sh` as a separate `saber` binary and
-select that binary on the Ripple preset. The
-server is text-only, runs one request at a time with queued clients, supports
-128K context and OpenAI tool calling, and binds loopback by default. Use
-`caps: {vision: false, thinking: true}`, `profile.system_first: false`, and
-`profile.tool_selection: "auto"`. Its template accepts trailing system messages;
-automatic selection bounds cold prefill and stays fixed within each run.
-Explicit caller tool allowlists still take precedence. Its reference sampling
-is deterministic (`temperature: 0.0`).
-
-Kolibri-1 uses the Kolibri-capable Saber fork, TP=2 and
-`SABER_MODEL=kolibri`. The reference `brain-kolibri-1-saber-tp2.conf` and
-`specialist-kolibri-1-saber-tp2.conf` map `MODEL_PATH` to the MXFP4 TP2 pack
-and `KOLIBRI_CHECKPOINT` to the BF16 checkpoint; set `SABER_REPO` in the live
-catalog. The text-only server queues concurrent clients, supports 262K context
-and OpenAI tool calling, and binds loopback by default. Keep `MAX_ROWS=256` for
-the optimized prefill kernel; the validated 128K cold prefill takes about 70
-seconds. Its template accepts trailing system messages, so use
-`profile.system_first: false`. Use `profile.tool_selection: "auto"` to avoid
-unnecessary schema tokens while keeping the toolset fixed within each run. Use
-`think_strip: qwen3`, `caps: {vision: false, thinking: true}` and the official
-sampling defaults (`temperature: 1.0`, `top_p: 0.97`, `top_k: 128`). A full
-256K prompt and long-context retrieval quality remain unvalidated.
+Occamy uses `brain-occamy-fp8-saber-tp2.conf`, two consecutive GPUs, official
+FP8 routed experts, BF16 dense/shared packs, and a strict leading-system
+template. It remains experimental and slower than llama.cpp; smoke-test
+compatibility only.
 
 ## External embed / rerank endpoints
 

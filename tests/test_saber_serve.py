@@ -163,6 +163,7 @@ def test_saber_flashnext_uses_native_launcher_without_27b_tp_args(tmp_path):
     repo, bindir = _fake_native(tmp_path)
     native = repo / "tools" / "serve_flashnext_native.sh"
     native.write_text("""#!/usr/bin/env bash
+HOST=${HOST:-127.0.0.1}
 set -u
 printf 'flashnext:%s\\n' "$*" >> "$FAKE_LOG"
 """)
@@ -178,10 +179,31 @@ printf 'flashnext:%s\\n' "$*" >> "$FAKE_LOG"
     assert "--tp" not in log.read_text()
 
 
+def test_saber_inkling_uses_native_launcher_without_27b_tp_args(tmp_path):
+    repo, bindir = _fake_native(tmp_path)
+    native = repo / "tools" / "serve_inkling_native.sh"
+    native.write_text("""#!/usr/bin/env bash
+HOST=${HOST:-127.0.0.1}
+set -u
+printf 'inkling:%s\\n' "$*" >> "$FAKE_LOG"
+""")
+    native.chmod(0o755)
+    env, log = _env(tmp_path, repo, bindir)
+    env.update({"SABER_RUNTIME": "native", "SABER_MODEL": "inkling",
+                "HIP_DEVICES": "0,1"})
+    result = subprocess.run(
+        [str(SCRIPT), "--ink-prefix-cache", "2"], env=env,
+        capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert "inkling:--no-build --ink-prefix-cache 2" in log.read_text()
+    assert "--tp" not in log.read_text()
+
+
 def test_saber_occamy_uses_native_launcher_without_27b_tp_args(tmp_path):
     repo, bindir = _fake_native(tmp_path)
     native = repo / "tools" / "serve_occamy_native.sh"
     native.write_text("""#!/usr/bin/env bash
+HOST=${HOST:-127.0.0.1}
 set -u
 printf 'occamy:%s\\n' "$*" >> "$FAKE_LOG"
 """)
@@ -263,3 +285,21 @@ def test_build_tools_default_native_and_keep_container_fallback():
     assert "SABER_BUILD=container" in build
     assert "cargo build --release -p saber-cli" in build
     assert 'export SABER_RUNTIME="${mode}"' in build
+
+
+def test_native_compatibility_wrappers_delegate_to_unified_checkout():
+    root = Path(__file__).parents[1]
+    mapping = {
+        "saber-27b-native.sh": "serve_27b_native.sh",
+        "saber-flashnext-native.sh": "serve_flashnext_native.sh",
+        "saber-inkling-native.sh": "serve_inkling_native.sh",
+        "saber-daisyrose-native.sh": "serve_daisyrose_native.sh",
+        "saber-ripple-native.sh": "ripple_serve_native.sh",
+        "saber-kolibri-native.sh": "kolibri_serve_native.sh",
+        "saber-occamy-native.sh": "serve_occamy_native.sh",
+    }
+    for script, launcher in mapping.items():
+        text = (root / "scripts" / script).read_text()
+        assert "SABER_REPO:-/srv/saber-jaynet-dev" in text
+        assert f'LAUNCHER="$REPO/tools/{launcher}"' in text
+        assert 'exec "$LAUNCHER" "$@"' in text

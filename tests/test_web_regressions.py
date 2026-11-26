@@ -625,6 +625,48 @@ def test_vllm_stats_from_metrics_maps_histograms_and_gauges():
     assert _vllm_stats_from_metrics({}) == {}
 
 
+@pytest.mark.asyncio
+async def test_add_server_metrics_maps_saber_histograms(monkeypatch):
+    """Saber process cards use the same avg decode/prefill fields as llama."""
+    from web.routes_procs import _add_server_metrics
+    text = (
+        'saber:inter_token_latency_seconds_sum{engine="0"} 0.25\n'
+        'saber:inter_token_latency_seconds_count{engine="0"} 32\n'
+        'saber:time_to_first_token_seconds_sum{engine="0"} 2\n'
+        'saber:engine_prefill_live_rows_total{engine="0"} 4000\n'
+        'saber:prompt_tokens_total{engine="0"} 5000\n'
+        'saber:generation_tokens_total{engine="0"} 48\n'
+    )
+
+    class _Resp:
+        def __init__(self):
+            self.text = text
+
+    class _Client:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            assert url == "http://127.0.0.1:8090/metrics"
+            return _Resp()
+
+    monkeypatch.setattr("web.routes_procs.httpx.AsyncClient", _Client)
+    st = {}
+    await _add_server_metrics(st, 8090)
+    assert st == {
+        "gen_tps_avg": 128.0,       # 32 / 0.25 (inverse mean ITL)
+        "prompt_tps_avg": 2000.0,   # fresh rows / TTFT, cached rows excluded
+        "tokens_generated": 48,
+        "tokens_prompt": 5000,
+    }
+
+
 # ---- LiteLLM status probe must use the unauthenticated liveness route --------
 @pytest.mark.asyncio
 async def test_admin_status_probes_litellm_liveness(web_app, monkeypatch):

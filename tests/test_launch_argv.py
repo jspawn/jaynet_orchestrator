@@ -148,7 +148,12 @@ def _saber_conf(tmp_path, *, tp=1):
         pack.mkdir(parents=True)
         for rank in ranks:
             (pack / rank).write_text("SBRPACK1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    binary = repo / "saber"
+    binary.write_text("")
     return {"MODEL_PATH": str(model), "MTP_MODEL": str(draft),
+            "SABER_REPO": str(repo), "SABER_BIN": str(binary),
             "CTX_SIZE": "65536", "MAX_NUM_SEQS": "4",
             "EXTRA_ARGS": "--enable-prefix-caching on --vision lazy"}
 
@@ -167,6 +172,8 @@ def test_saber_tp1_maps_packs_devices_and_shared_keys(tmp_path):
     assert env["TIER"].endswith("-tp1-fp8head")
     assert env["DRAFT"].endswith("-tp1-fp8head")
     assert env["SABER_PACKS"] == str(tmp_path / "packs")
+    assert env["SABER_REPO"] == str(tmp_path / "repo")
+    assert env["SABER_BIN"] == str(tmp_path / "repo" / "saber")
     assert warns == []
 
 
@@ -194,7 +201,12 @@ def _flashnext_conf(tmp_path):
         (pack / rank).mkdir(parents=True, exist_ok=True)
         (pack / rank / "trunk8.pack").write_text("SBRPACK1")
     (pack / "manifest.json").write_text("{}")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    binary = repo / "saber"
+    binary.write_text("")
     return {"SABER_MODEL": "flashnext", "MODEL_PATH": str(pack),
+            "SABER_REPO": str(repo), "SABER_BIN": str(binary),
             "CTX_SIZE": "262144", "EXTRA_ARGS": "--fn-vision lazy"}
 
 
@@ -208,6 +220,8 @@ def test_saber_flashnext_maps_tp2_pack_without_dflash2(tmp_path):
     assert env["SABER_NVME"] == str(tmp_path / "nvme")
     assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
     assert env["MODEL"] == "qwen-flashnext"
+    assert env["SABER_REPO"] == str(tmp_path / "repo")
+    assert env["SABER_BIN"] == str(tmp_path / "repo" / "saber")
     assert env["MAX_CTX"] == "262144"
     assert warns == []
 
@@ -268,6 +282,50 @@ def test_saber_ripple_requires_tp2_complete_packs_and_one_request(tmp_path):
     conf["MAX_NUM_SEQS"] = "1"
     (tmp_path / "packs" / "draft" / "rank1.pack").unlink()
     with pytest.raises(ValueError, match="draft/rank1.pack"):
+        build_argv("saber", conf, **_kwargs(gpu="0,1"))
+
+
+def _inkling_conf(tmp_path):
+    pack = tmp_path / "pack"
+    for relative in ("manifest.json", "base/model.safetensors.index.json",
+                     "base/config.json", "base/generation_config.json",
+                     "base/tokenizer.json", "base/chat_template.jinja",
+                     "rank0/dense.json", "rank1/dense.json", "shared/dense.json",
+                     "draft/manifest.json", "trunk8/manifest.json"):
+        path = pack / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+    repo = tmp_path / "inkling-repo"
+    repo.mkdir()
+    binary = repo / "saber"
+    binary.write_text("")
+    return {"SABER_MODEL": "inkling", "MODEL_PATH": str(pack),
+            "SABER_REPO": str(repo), "SABER_BIN": str(binary),
+            "CTX_SIZE": "32768", "MAX_NUM_SEQS": "1"}
+
+
+def test_saber_inkling_maps_self_contained_tp2_pack_and_loopback(tmp_path):
+    conf = _inkling_conf(tmp_path)
+    argv, env, warns = build_argv(
+        "saber", conf, **_kwargs(gpu="0,1", alias="inkling-2-mini-saber-tp2"))
+    assert argv == ["/bin/x"]
+    assert env["SABER_MODEL"] == "inkling"
+    assert env["SABER_REPO"] == conf["SABER_REPO"]
+    assert env["SABER_BIN"] == conf["SABER_BIN"]
+    assert env["INK_PACK"] == conf["MODEL_PATH"]
+    assert env["MODEL"] == "inkling-2-mini-saber-tp2"
+    assert env["HIP_DEVICES"] == "0,1" and "DEVICE" not in env
+    assert env["HOST"] == "127.0.0.1" and env["PORT"] == "8090"
+    assert env["MAX_CTX"] == "32768" and env["MAX_SEQS"] == "1"
+    assert warns == []
+
+
+def test_saber_inkling_requires_tp2_and_complete_pack(tmp_path):
+    conf = _inkling_conf(tmp_path)
+    with pytest.raises(ValueError, match="two GPUs"):
+        build_argv("saber", conf, **_kwargs(gpu="1"))
+    (tmp_path / "pack" / "base" / "generation_config.json").unlink()
+    with pytest.raises(ValueError, match="base/generation_config.json"):
         build_argv("saber", conf, **_kwargs(gpu="0,1"))
 
 

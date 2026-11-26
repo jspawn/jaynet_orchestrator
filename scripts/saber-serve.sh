@@ -3,26 +3,17 @@
 # Env comes from runtime/launch_argv.py; extra argv goes to upstream's server.
 set -uo pipefail
 
-SABER_REPO="${SABER_REPO:-}"
+SABER_REPO="${SABER_REPO:-/srv/saber-jaynet-dev}"
 SABER_MODEL="${SABER_MODEL:-27b}"
 NATIVE_LAUNCHER="$SABER_REPO/tools/serve_27b_native.sh"
 if [[ "$SABER_MODEL" == flashnext ]]; then
     NATIVE_LAUNCHER="${SABER_FLASHNEXT_LAUNCHER:-$SABER_REPO/tools/serve_flashnext_native.sh}"
-    # The pinned build tree need not carry the fork's native Flash-Next script.
-    if [[ ! -x "$NATIVE_LAUNCHER" && -n "${JAYNET_HOME:-${ORCH_HOME:-}}" ]]; then
-        NATIVE_LAUNCHER="${JAYNET_HOME:-${ORCH_HOME}}/scripts/saber-flashnext-native.sh"
-    fi
+elif [[ "$SABER_MODEL" == inkling ]]; then
+    NATIVE_LAUNCHER="${SABER_INKLING_LAUNCHER:-$SABER_REPO/tools/serve_inkling_native.sh}"
 elif [[ "$SABER_MODEL" == occamy ]]; then
     NATIVE_LAUNCHER="${SABER_OCCAMY_LAUNCHER:-$SABER_REPO/tools/serve_occamy_native.sh}"
-    # Occamy currently lives in a separate architecture fork.
-    if [[ ! -x "$NATIVE_LAUNCHER" && -n "${JAYNET_HOME:-${ORCH_HOME:-}}" ]]; then
-        NATIVE_LAUNCHER="${JAYNET_HOME:-${ORCH_HOME}}/scripts/saber-occamy-native.sh"
-    fi
 elif [[ "$SABER_MODEL" == ripple ]]; then
     NATIVE_LAUNCHER="${SABER_RIPPLE_LAUNCHER:-$SABER_REPO/tools/ripple_serve_native.sh}"
-    if [[ ! -x "$NATIVE_LAUNCHER" && -n "${JAYNET_HOME:-${ORCH_HOME:-}}" ]]; then
-        NATIVE_LAUNCHER="${JAYNET_HOME:-${ORCH_HOME}}/scripts/saber-ripple-native.sh"
-    fi
 elif [[ "$SABER_MODEL" == kolibri ]]; then
     NATIVE_LAUNCHER="${SABER_KOLIBRI_LAUNCHER:-$SABER_REPO/tools/kolibri_serve_native.sh}"
 elif [[ "$SABER_MODEL" == daisyrose ]]; then
@@ -35,7 +26,7 @@ if [[ "$RUNTIME" != auto && "$RUNTIME" != native && "$RUNTIME" != container ]]; 
 fi
 
 TP_ARGS=()
-if [[ "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri || "$SABER_MODEL" == daisyrose ]]; then
+if [[ "$SABER_MODEL" == flashnext || "$SABER_MODEL" == inkling || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri || "$SABER_MODEL" == daisyrose ]]; then
     [[ "${HIP_DEVICES:-}" =~ ^[0-9]+,[0-9]+$ ]] \
         || { echo "saber: $SABER_MODEL needs HIP_DEVICES=<card,card> (TP=2)" >&2; exit 1; }
 elif [[ -n "${DEVICE:-}" ]]; then
@@ -48,9 +39,8 @@ else
 fi
 
 if [[ "$RUNTIME" != container && -x "$NATIVE_LAUNCHER" ]]; then
-    if [[ "$SABER_MODEL" != flashnext && "$SABER_MODEL" != occamy ]] \
-        && ! grep -qF -- 'HOST=${HOST:-127.0.0.1}' "$NATIVE_LAUNCHER"; then
-        echo "saber: native launcher lacks the loopback default; run build_tools.sh saber rocm" >&2
+    if ! grep -qF -- 'HOST=${HOST:-127.0.0.1}' "$NATIVE_LAUNCHER"; then
+        echo "saber: native launcher lacks the loopback default: $NATIVE_LAUNCHER" >&2
         exit 1
     fi
     command -v setsid >/dev/null 2>&1 || { echo "saber: setsid not found" >&2; exit 1; }
@@ -78,7 +68,7 @@ if [[ "$RUNTIME" != container && -x "$NATIVE_LAUNCHER" ]]; then
     rc=$?
     exit "$rc"
 fi
-if [[ "$RUNTIME" == native || "$SABER_MODEL" == flashnext || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri || "$SABER_MODEL" == daisyrose ]]; then
+if [[ "$RUNTIME" == native || "$SABER_MODEL" == flashnext || "$SABER_MODEL" == inkling || "$SABER_MODEL" == occamy || "$SABER_MODEL" == ripple || "$SABER_MODEL" == kolibri || "$SABER_MODEL" == daisyrose ]]; then
     echo "saber: native launcher not executable: $NATIVE_LAUNCHER" >&2
     exit 1
 fi
