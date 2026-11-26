@@ -238,6 +238,11 @@ async def test_models_delete_refuses_preset_assigned(web_app, web_client,
                            json={"path": "Qwen/a.gguf"})
         assert r.status_code == 409
         assert "p1" in r.json()["detail"]
+        for unnormalized in ("Qwen//a.gguf", "Qwen/./a.gguf"):
+            r = await c.request("DELETE", "/api/admin/models/file",
+                               json={"path": unnormalized})
+            assert r.status_code == 409, unnormalized
+        assert (models_dir / "Qwen" / "a.gguf").exists()
         assert (models_dir / "Qwen" / "a.gguf").exists()
         # the folder containing it — same guard
         r = await c.request("DELETE", "/api/admin/models/file", json={"path": "Qwen"})

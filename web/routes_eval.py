@@ -897,7 +897,7 @@ def register(app, s):
                     await _eval_sched_tick()
                 except Exception as e:
                     print(f"[eval-scheduler] tick failed: {e}")
-        app.state.eval_sched_task = asyncio.create_task(loop())
+        app.state.eval_sched_task = spawn_background(loop(), name="eval-scheduler")
         print("[eval-scheduler] enabled (tick 60s)")
 
     s.startup_hooks.append(_start_eval_scheduler)

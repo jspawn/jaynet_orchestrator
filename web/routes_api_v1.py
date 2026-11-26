@@ -79,7 +79,8 @@ def register(app, s):
                    "sub_budget": req.sub_budget,
                    "architect_threshold": req.architect_threshold,
                    "architect_mode": req.architect_mode},
-            images=images)
+            images=images,
+            extra_roots=([str(s._owner_dir(request))] if req.attachments else None))
         return {"run_id": run_id, "v": PROTOCOL_VERSION}
 
     @app.get("/api/v1/runs/{run_id}")

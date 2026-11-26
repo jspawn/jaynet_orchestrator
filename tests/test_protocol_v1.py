@@ -244,6 +244,22 @@ async def test_v1_create_run_returns_run_id(web_app, web_client):
 
 
 @pytest.mark.asyncio
+async def test_v1_attachments_add_upload_root_for_tools(web_app, web_client, record_run):
+    app = web_app()
+    seen = record_run(app)
+    async with web_client(app) as c:
+        uploaded = await c.post("/api/upload", params={"filename": "note.txt"},
+                                content=b"attachment")
+        att = uploaded.json()["id"]
+        r = await c.post("/api/v1/runs", json={
+            "message": "read the attachment", "attachments": [att]})
+        assert r.status_code == 200
+        owner_root = seen["extra_roots"][0]
+        assert owner_root.endswith("/admin")
+        assert (await c.get(f"/api/upload/{att}")).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_v1_slash_message_is_422(web_app, web_client):
     app = web_app()
     async with web_client(app) as c:

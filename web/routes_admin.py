@@ -4,7 +4,6 @@ flags, watchdog reports, usage, users and RAG (split out of web/server.py)."""
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import re
 import shutil
@@ -179,7 +178,9 @@ def _set_nested(d, dotpath, value):
     """Set a nested dict value from a dot-path string."""
     parts = dotpath.split(".")
     for p in parts[:-1]:
-        d = d.setdefault(p, {})
+        if not isinstance(d.get(p), dict):
+            d[p] = {}
+        d = d[p]
     d[parts[-1]] = value
 
 
@@ -215,6 +216,59 @@ def _apply_config_update(config: dict, config_path, dotpath: str, value):
         _del_nested(config, dotpath)
     else:
         _set_nested(config, dotpath, v)
+
+
+async def _stream_restore_upload(file, archive: Path, limit: int, max_mb: int) -> None:
+    """Cap an archive upload while streaming it to disk in 1 MiB chunks."""
+    size = 0
+    with archive.open("wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(status_code=413,
+                                    detail=f"backup exceeds {max_mb} MB limit")
+            await asyncio.to_thread(out.write, chunk)
+
+
+def _restore_backup_archive(archive: Path, tmp: Path, data_dir: Path) -> None:
+    """Validate, extract, and whitelist-swap one uploaded backup archive."""
+    stage = tmp / "data"
+    stage.mkdir()
+    try:
+        with tarfile.open(archive, mode="r:gz") as tar:
+            for m in tar.getmembers():
+                if m.name.startswith("/") or ".." in Path(m.name).parts:
+                    raise HTTPException(status_code=400,
+                                        detail="unsafe path in archive")
+            tar.extractall(stage, filter="data")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400,
+                            detail="not a valid .tar.gz backup archive")
+    if not any((stage / name).is_file()
+               for name in ("users.db", "chats.db", "presets.db", "trace.db",
+                            "memory.db", "rag.db", "research.db")):
+        raise HTTPException(status_code=400,
+                            detail="archive contains no recognized data store")
+    from runtime.backup import BACKUP_DIRS, BACKUP_FILES
+    for item in stage.iterdir():
+        if not (item.suffix == ".db" or item.name in BACKUP_DIRS
+                or item.name in BACKUP_FILES):
+            continue
+        dst = data_dir / item.name
+        if item.is_dir():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(item, dst)
+        else:
+            shutil.copy2(item, str(dst) + ".restore-tmp")
+            Path(str(dst) + ".restore-tmp").replace(dst)
+            if item.suffix == ".db":
+                for ext in ("-wal", "-shm"):
+                    p = Path(str(dst) + ext)
+                    if p.exists():
+                        p.unlink()
 
 
 def register(app, s):
@@ -877,6 +931,7 @@ def register(app, s):
             raise HTTPException(404, "no such file or folder in the models dir")
         if target == _rt_paths.MODELS_DIR.resolve():
             raise HTTPException(400, "refusing to delete the models dir itself")
+        rel = target.relative_to(_rt_paths.MODELS_DIR.resolve()).as_posix()
         assigned = _assigned_models()
         if target.is_dir():
             prefix = rel + "/"
@@ -1846,56 +1901,13 @@ def register(app, s):
 
     @app.post("/api/admin/restore")
     async def admin_restore(file: UploadFile = File(...)):
-        limit = s.max_restore_mb * 1024 * 1024
-        blob = await read_upload_capped(
-            file, limit, f"backup exceeds {s.max_restore_mb} MB limit")
         tmp = Path(tempfile.mkdtemp(prefix="jaynet-restore-"))
+        archive = tmp / "upload.tar.gz"
         try:
-            stage = tmp / "data"
-            stage.mkdir()
-            try:
-                with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-                    for m in tar.getmembers():
-                        if m.name.startswith("/") or ".." in Path(m.name).parts:
-                            raise HTTPException(status_code=400,
-                                                detail="unsafe path in archive")
-                    tar.extractall(stage, filter="data")
-            except HTTPException:
-                raise
-            except Exception:
-                raise HTTPException(status_code=400,
-                                    detail="not a valid .tar.gz backup archive")
-            # Must look like a JayNet backup: at least one recognized store.
-            if not any((stage / name).is_file()
-                       for name in ("users.db", "chats.db", "presets.db", "trace.db",
-                                    "memory.db", "rag.db", "research.db")):
-                raise HTTPException(status_code=400,
-                                    detail="archive contains no recognized data store")
-            # Fully extracted — now swap each item into the live data dir.
-            # Mirror the backup whitelist (audit D1): the *.db stores plus the
-            # dirs/files backup itself writes. Anything else in the archive
-            # (session.secret, arbitrary extra dirs) is ignored, not swapped in.
-            from runtime.backup import BACKUP_DIRS, BACKUP_FILES
-            for item in stage.iterdir():
-                if not (item.suffix == ".db" or item.name in BACKUP_DIRS
-                        or item.name in BACKUP_FILES):
-                    continue
-                dst = data_dir / item.name
-                if item.is_dir():
-                    if dst.exists():
-                        shutil.rmtree(dst)
-                    shutil.copytree(item, dst)
-                else:
-                    shutil.copy2(item, str(dst) + ".restore-tmp")
-                    Path(str(dst) + ".restore-tmp").replace(dst)
-                    # A restored db must not pick up the previous one's live WAL.
-                    if item.suffix == ".db":
-                        for ext in ("-wal", "-shm"):
-                            p = Path(str(dst) + ext)
-                            if p.exists():
-                                p.unlink()
-            # SQLite handles in this process still point at the old files; the
-            # admin must restart the service before the restored data is live.
+            await _stream_restore_upload(
+                file, archive, s.max_restore_mb * 1024 * 1024, s.max_restore_mb)
+            await asyncio.to_thread(_restore_backup_archive, archive, tmp, data_dir)
+            # Existing SQLite handles still point at the old files.
             return {"ok": True, "restart_required": True}
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, tmp, ignore_errors=True)

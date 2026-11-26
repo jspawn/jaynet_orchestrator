@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from fastapi import HTTPException, Request
@@ -96,7 +97,7 @@ def register(app, s):
         body = await request.body()
         if len(body) > limit:
             raise HTTPException(status_code=413, detail="file too large")
-        out = PJ.write_file(root, path, body)
+        out = await asyncio.to_thread(PJ.write_file, root, path, body)
         if out is None:
             raise HTTPException(status_code=400, detail="invalid path")
         _hooks.fire("on_project_file_changed", _owner(request),
@@ -186,7 +187,7 @@ def register(app, s):
         body = await request.body()
         if len(body) > limit:
             raise HTTPException(status_code=413, detail="file too large")
-        out = PJ.write_file(root, path, body)
+        out = await asyncio.to_thread(PJ.write_file, root, path, body)
         if out is None:
             raise HTTPException(status_code=400, detail="invalid path")
         return out

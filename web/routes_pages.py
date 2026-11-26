@@ -343,11 +343,13 @@ def register(app, s):
         u = _user(request)
         if u["username"] == "_token":
             raise HTTPException(status_code=403, detail="token session cannot change password")
-        if not users.verify(u["username"], req.current_password):
+        if not await asyncio.to_thread(users.verify,
+                                       u["username"], req.current_password):
             raise HTTPException(status_code=403, detail="current password is incorrect")
         if len(req.new_password) < MIN_PASSWORD_LEN:
             raise HTTPException(status_code=400, detail="new password must be at least 8 characters")
-        users.set_password(u["username"], req.new_password)   # bumps session_epoch
+        await asyncio.to_thread(users.set_password,
+                                u["username"], req.new_password)  # bumps session_epoch
         # Re-issue this browser's cookie at the new epoch so the password change
         # signs out other sessions but keeps the current one alive.
         resp = JSONResponse({"ok": True})

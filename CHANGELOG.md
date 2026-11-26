@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.52.4 — 2026-11-27
+
+- **Uploads and attachments:** `/api/stt` accepts its intended 25 MB audio
+  payloads, and `/api/v1/runs` exposes uploaded files to tools through the
+  owner's extra root.
+- **Path and config safety:** model deletion normalizes resolved paths before
+  checking active presets, and nested admin config updates replace null
+  intermediate values safely.
+- **Availability:** eval scheduling uses tracked shutdown; password changes,
+  process-log reads, and project/scratch writes leave the event loop.
+- **Restore:** uploads stream to disk with a size cap instead of buffering the
+  whole archive; extraction and copying run in a worker thread.
+- **Verification:** 2,957 tests pass, plus all release gates.
+
 ## 1.52.3 — 2026-11-27
 
 - **Runtime and process reliability:** correct transcript ordering, parallel

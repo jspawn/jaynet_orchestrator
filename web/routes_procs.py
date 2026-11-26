@@ -300,7 +300,8 @@ def register(app, s):
                 from pathlib import Path
 
                 from runtime import serving as S
-                tail = S.tail(Path(occ["log_dir"]) / "stderr.log", lines)
+                tail = await asyncio.to_thread(
+                    S.tail, Path(occ["log_dir"]) / "stderr.log", lines)
                 return {"name": name, "lines": tail.splitlines(),
                         "swap": occ.get("name")}
         return {"name": name, "lines": proc_mgr.logs(name, lines)}

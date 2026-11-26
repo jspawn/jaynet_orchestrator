@@ -51,6 +51,24 @@ async def test_stt_transcribe_forwards_and_parses(web_app, web_client, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_stt_transcribe_allows_audio_above_global_body_cap(web_app, web_client, monkeypatch):
+    app = web_app()
+    data = b"x" * (5 * 1024 * 1024)
+
+    async def _fake(url, filename, payload):
+        assert payload == data
+        return "large audio"
+
+    import web.routes_chats as RC
+    monkeypatch.setattr(RC, "_stt_forward", _fake)
+    async with web_client(app) as c:
+        r = await c.post("/api/stt",
+                         files={"file": ("large.wav", data, "audio/wav")})
+    assert r.status_code == 200, r.text
+    assert r.json()["text"] == "large audio"
+
+
+@pytest.mark.asyncio
 async def test_stt_transcribe_slot_down_is_503(web_app, web_client, monkeypatch):
     app = web_app()
 

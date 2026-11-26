@@ -740,6 +740,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     _max_restore = max_restore_mb * 1024 * 1024
 
     def _body_limit(path: str) -> int:
+        if path == "/api/stt":
+            return 25 * 1024 * 1024 + 1024 * 1024  # audio + multipart overhead
         if path == "/api/upload":
             return _max_upload
         if path == "/api/admin/restore":
