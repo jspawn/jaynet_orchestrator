@@ -5,6 +5,29 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.51.0 — 2026-11-26
+
+- **Unified Saber integration:** model-family dispatch now uses each native
+  foreground launcher from one Saber checkout. Reference presets cover Qwen3.8
+  27B TP1/TP2, Flash-Next, Ripple-65B, Kolibri-1, DaisyRose and Inkling 2 Mini;
+  Occamy remains experimental. Existing wrappers stay as compatibility entry
+  points rather than duplicated launch arguments.
+- **Saber stability and caching:** Ripple keeps stable prompt prefixes through
+  per-preset tool selection, Kolibri uses optimized prefill defaults, automatic
+  tool selection bounds cold prefill, and Inkling vision launches account for
+  projector memory. Occamy's slower Saber MTP path is disabled.
+- **Evidence-guided experiments:** lesson retrieval ranks relevant measured
+  outcomes and exposes regressions and no-effect results to the proposer.
+  Optional two-cycle Propose–Probe–Compose runs carry composed overlays forward,
+  retain every cycle and only offer measured overall improvements for acceptance.
+  Multi-edit overlay proposals use canonical schema 2 with run-local stacking.
+- **Chat reliability:** transient SSE disconnects now use native EventSource
+  reconnect and `Last-Event-ID` replay instead of abandoning a run that is still
+  completing server-side.
+- **Dependencies:** LiteLLM is pinned to 1.110.2. Sync all three lockfiles and
+  restart both services when upgrading. Saber models and the unified checkout
+  remain explicit operator-managed assets.
+
 ## 1.50.0 — 2026-11-16
 
 Cumulative public release rolling up v1.41.0–v1.45.2 and the final Saber /

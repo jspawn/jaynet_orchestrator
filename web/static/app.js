@@ -1575,10 +1575,13 @@ function openStream(runId){
     expireCards();              // no live approve/ask cards past the end
     drainQueue();               // a queued follow-up fires as its own turn
   }));
-  // A fatal stream error (401/404/413, dead service) is NOT retried by the
-  // EventSource — without a terminal branch the chat spun "running…"
-  // forever (FE-3).
+  // CONNECTING is a transient drop: keep the native EventSource retry alive so
+  // Last-Event-ID resumes the run. Only CLOSED is terminal (401/404/413).
   es.onerror=()=>{
+    if(es && es.readyState===EventSource.CONNECTING){
+      setStatus("stream interrupted — reconnecting…", true);
+      return;
+    }
     if(es){ es.close(); es=null; }
     currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
@@ -2760,9 +2763,12 @@ async function init(){
                trajectory:"", events:[]};
     setStatus("reconnecting…", true);
     openStream(activeRun);
-    // If the stream errors immediately (run gone), clean up after a short delay
-    const _prevErr = es.onerror;
+    // Keep native retries for transient drops; clean up only a terminal error.
     es.onerror = () => {
+      if(es && es.readyState===EventSource.CONNECTING){
+        setStatus("stream interrupted — reconnecting…", true);
+        return;
+      }
       LS.removeItem("jaynet.activeRun");
       if(es){ es.close(); es=null; }
       currentRun=null;

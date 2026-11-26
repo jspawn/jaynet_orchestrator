@@ -16,6 +16,8 @@ Covered here:
 """
 
 
+from pathlib import Path
+
 import httpx
 import pytest
 
@@ -121,3 +123,10 @@ async def test_bearer_token_shares_token_row(web_app, web_client):
     async with web_client(app) as c:
         assert (await c.get("/api/current-chat")).json()["chat"] is None
     assert app.state.chats.get_current("_token")["chat"] == SNAP
+
+
+def test_transient_stream_errors_keep_native_reconnect():
+    """A dropped SSE connection must not discard the live run or its replay."""
+    source = (Path(__file__).parent.parent / "web/static/app.js").read_text()
+    assert source.count("es.readyState===EventSource.CONNECTING") == 2
+    assert source.count('setStatus("stream interrupted — reconnecting…", true)') == 2

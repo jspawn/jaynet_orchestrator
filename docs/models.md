@@ -299,8 +299,8 @@ the drafter. Inkling reasoning and tool-call parsing support tool-driven
 delegation and separate `reasoning` output. The 256K preset enables one prefix
 node and disables the drafter to fit it; this configuration uses 22.77 GiB per
 rank. Non-streaming and streaming tools, tool-result follow-up, separated
-reasoning and clean shutdown passed. Cached prompt tokens appear in
-`usage.prompt_tokens_details.cached_tokens`; the cached probe reported 194
+reasoning and clean shutdown passed. Cached prompt tokens appear under
+`usage` → `prompt_tokens_details` → `cached_tokens`; the cached probe reported 194
 tokens with exact output parity. Its advertised 1M model context is not a
 validated serving limit.
 
