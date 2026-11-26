@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.52.2 — 2026-11-26
+
+- **Loop correctness:** fix interactive confirmation and admin `force_tools`
+  crashes, preserve brain-gate schemas after `tools.load`, and propagate
+  independently cancelled parallel tool calls. Dynamic private-result flags and
+  private image messages retain their privacy taint.
+- **Run-local configuration:** role policy, brain gates, prompt/routing helpers,
+  cloud/privacy confirmation and tool timeouts now consistently use run-local
+  patches. Plugin routing telemetry keeps its original pick, and dotted admin
+  overrides safely replace null/scalar subtrees.
+- **Performance:** cold specialist health probes run concurrently; per-run tools
+  patches deep-copy only patched namespaces instead of the whole tools section.
+- **Verification:** 2,919 tests pass, plus all release gates.
+
 ## 1.52.1 — 2026-11-26
 
 - **Sandbox and preview security:** Python Firejail whitelists hide JayNet's

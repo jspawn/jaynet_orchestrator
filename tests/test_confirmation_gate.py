@@ -45,3 +45,17 @@ def test_no_tty_auto_confirm_bypasses(monkeypatch):
 def test_confirmation_disabled_bypasses(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert _confirm(_rt({"confirmation": {"enabled": False}})) is True
+
+
+def test_interactive_tty_emits_decision_source(monkeypatch):
+    events = []
+
+    async def emit(*args):
+        events.append(args)
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    approved = asyncio.run(_rt({})._confirm(
+        "fs.write", {}, "r", False, emit))
+    assert approved is True
+    assert events[0][2]["via"] == "tty"

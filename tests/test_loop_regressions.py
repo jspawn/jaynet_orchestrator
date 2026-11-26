@@ -17,7 +17,7 @@ from runtime.model_client import ContextWindowExceeded
 from runtime.quick_reply import QuickReply, _display_name
 from runtime.run_state import RunState
 from runtime.selector import ToolSelector
-from runtime.tool_base import ToolResult
+from runtime.tool_base import ToolContext, ToolResult
 from tools.agent.spawn import AgentSpawn
 
 CFG = {
@@ -498,6 +498,45 @@ def test_force_tools_appended_and_unknown_dropped():
     assert "graph.bogus" not in selected
 
 
+def test_force_tools_admin_default_disabled_set_does_not_crash():
+    reg = _Registry(["web.search", "llm.call", "graph.build"])
+    rt, _ = _runtime(reg, [_final("ok")])
+    rt.config["tool_selection"] = dict(_FORCE_CFG)
+    rt.selector = ToolSelector(reg, rt.config)
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("how does auth connect to the db?",
+                             run_overrides={"force_tools": ["graph.build"]},
+                             is_admin=True, on_event=on_event))
+    assert out["status"] == "ok"
+    sel = next(e for e in events if e["type"] == "tool_selection")
+    assert "graph.build" in sel["data"]["selected"]
+
+
+def test_force_tools_uses_run_local_admin_patterns():
+    reg = _Registry(["web.search", "llm.call", "graph.build"])
+    rt, _ = _runtime(reg, [_final("ok")])
+    rt.config["tool_selection"] = dict(_FORCE_CFG)
+    rt.selector = ToolSelector(reg, rt.config)
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run(
+        "how does auth connect to the db?",
+        run_overrides={"force_tools": ["graph.build"],
+                       "config_patch": {"security": {
+                           "admin_only_tools": ["graph.build"]}}},
+        on_event=on_event))
+    assert out["status"] == "ok"
+    sel = next(e for e in events if e["type"] == "tool_selection")
+    assert "graph.build" not in sel["data"]["selected"]
+
+
 def test_force_tools_respects_disabled():
     selected = _force_run(["graph.build", "graph.query"],
                           disabled={"graph.build"})
@@ -551,6 +590,22 @@ def test_select_full_toolset_keyword_not_in_all_mode():
     s = _sel(["fs.read"], {"tool_selection": {"mode": "all",
                                               "full_toolset_keywords": ["selftest"]}})
     assert s.select("selftest") is None
+
+
+def test_routing_nudge_uses_run_local_config():
+    rt, _ = _runtime(_Registry([]), [_final("done")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run(
+        "implement a parser and fix this code",
+        run_overrides={"config_patch": {"tool_selection": {
+            "routing_nudge": {"enabled": False}}}},
+        on_event=on_event))
+    assert out["status"] == "ok"
+    assert not [e for e in events if e["type"] == "route_decision"]
 
 
 # ---- selector: category aliases (the gate-prompt / tools.load vocabulary) ----
@@ -1731,6 +1786,28 @@ class _ExecTool(_StubTool):
         return ToolResult(status="ok", result="secret-data", tool_name=self.name)
 
 
+class _CancelTool(_ExecTool):
+    async def execute(self, args, ctx):
+        raise asyncio.CancelledError
+
+
+def test_parallel_child_cancellation_stops_before_another_model_turn():
+    first = _tc("test.cancel", "{}")["tool_calls"][0]
+    second = _tc("test.other", "{}")["tool_calls"][0]
+    second["id"] = "c2"
+    script = [{"role": "assistant", "content": None,
+               "tool_calls": [first, second]}, _final("must not run")]
+    reg = _Registry([], real={
+        "test.cancel": _CancelTool("test.cancel"),
+        "test.other": _ExecTool("test.other"),
+    })
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run("x", run_overrides={
+        "parallel_tools": {"enabled": True}}))
+    assert out["status"] == "cancelled"
+    assert len(seen) == 1
+
+
 def _privacy_rt(script):
     """Runtime with a private reader + a cloud tool, and llm.call marked remote."""
     rt, _ = _runtime(_Registry([], real={
@@ -1752,6 +1829,53 @@ class _RecordingConfirm:
     async def confirm(self, run_id, name, args, emit, reason=None):
         self.asks.append((name, reason))
         return self.verdict
+
+
+class _DynamicPrivateTool(_ExecTool):
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result="secret", private=True,
+                          tool_name=self.name)
+
+
+def test_execute_tool_preserves_dynamic_private_flag():
+    tool = _DynamicPrivateTool("test.dynamic")
+    rt, _ = _runtime(_Registry([], real={"test.dynamic": tool}), [])
+    ctx = ToolContext(request_id="t", budget=None, config=rt.config)
+    result = asyncio.run(rt._execute_tool("test.dynamic", {}, ctx))
+    assert tool.private is False
+    assert result.private is True
+
+
+class _ConfirmTool(_ExecTool):
+    def needs_confirmation(self, args, ctx):
+        return True
+
+
+def test_confirmation_uses_run_local_config():
+    reg = _Registry([], real={"test.confirm": _ConfirmTool("test.confirm")})
+    rt, seen = _runtime(reg, [_tc("test.confirm", "{}"), _final("done")])
+    out = asyncio.run(rt.run(
+        "x", run_overrides={"config_patch": {
+            "confirmation": {"enabled": False}}}))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
+    assert tool_msgs and "secret-data" in tool_msgs[0]["content"]
+
+
+class _SlowTool(_ExecTool):
+    async def execute(self, args, ctx):
+        await asyncio.sleep(0.05)
+        return await super().execute(args, ctx)
+
+
+def test_tool_timeout_uses_run_local_tools_patch():
+    reg = _Registry([], real={"test.slow": _SlowTool("test.slow")})
+    rt, _ = _runtime(reg, [_tc("test.slow", "{}"), _final("done")])
+    out = asyncio.run(rt.run(
+        "x", run_overrides={"tools_patch": {
+            "call_timeout_overrides": {"test.slow": 0.001}}}))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    assert "hard call limit" in out["trajectory"]
 
 
 def test_tainted_cloud_call_asks_privacy_and_proceeds_on_approval():
@@ -2060,6 +2184,34 @@ def test_tools_load_expands_toolset_mid_run():
     assert "git.status" not in schemas[1]           # only what was asked for
     tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
     assert any("fs.write" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_tools_load_expansion_keeps_brain_gate_schema_notes():
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("saved")]
+    rt, seen, schemas = _expand_runtime(script)
+    rt.config["tools"] = {"code": {"brain_mode": "verify"}}
+    rt.config["models"] = {
+        "slots": {"specialist": "coder"},
+        "presets": {"coder": {"strengths": ["coding"]}}}
+    rt.config["tool_selection"]["core_namespaces"].append("fs.write")
+    rt.selector = ToolSelector(rt.registry, rt.config)
+    raw = []
+    orig = rt._model_turn
+
+    async def cap(messages, tools_schema, **kw):
+        raw.append(tools_schema)
+        return await orig(messages, tools_schema, **kw)
+
+    rt._model_turn = cap
+    out = asyncio.run(rt.run(
+        "please save this with a detailed implementation and careful checks " + "word " * 25))
+    assert out["status"] == "ok"
+    for turn_schemas in raw:
+        desc = next((s["function"]["description"] for s in turn_schemas
+                     if s["function"]["name"] == "fs.write"), None)
+        assert desc is not None, [s["function"]["name"] for s in turn_schemas]
+        assert "specialist.delegate" in desc
 
 
 def test_tools_load_expansion_cap():

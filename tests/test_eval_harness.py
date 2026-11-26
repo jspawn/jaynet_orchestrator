@@ -263,13 +263,19 @@ def test_check_expectations_blocked_tools_not_called():
 
 def test_patch_tools_config_never_mutates_shared():
     from runtime.loop import _patch_tools_config
-    base = {"tools": {"memory": {"db_path": "/real/memory.db"}}, "other": 1}
+    base = {"tools": {
+        "memory": {"db_path": "/real/memory.db", "nested": {"retries": 1}},
+        "web": {"nested": {"retries": 2}}}, "other": 1}
     patched = _patch_tools_config(base, {"memory": {"db_path": "/tmp/m.db"},
                                          "rag": {"db_path": "/tmp/r.db"}})
     assert patched["tools"]["memory"]["db_path"] == "/tmp/m.db"
     assert patched["tools"]["rag"]["db_path"] == "/tmp/r.db"
     assert base["tools"]["memory"]["db_path"] == "/real/memory.db"
     assert "rag" not in base["tools"]
+    assert patched["tools"]["web"] is base["tools"]["web"]  # unpatched: shared read-only view
+    assert patched["tools"]["memory"]["nested"] is not base["tools"]["memory"]["nested"]
+    patched["tools"]["memory"]["nested"]["retries"] = 9
+    assert base["tools"]["memory"]["nested"]["retries"] == 1
     assert _patch_tools_config(base, None) is base
 
 

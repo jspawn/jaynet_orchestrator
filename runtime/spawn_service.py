@@ -293,7 +293,7 @@ class SpawnService:
             else:
                 ok = await self.runtime._confirm(
                     "agent.spawn", gate_args, self.run_id, self.auto_confirm,
-                    emit, self.confirm_provider)
+                    emit, self.confirm_provider, config=self.run_config)
                 if not ok:
                     return {"status": "error", "answer": "",
                             "error": f"declined: human did not approve spawning a "

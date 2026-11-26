@@ -172,18 +172,17 @@ def _format_trajectory(entries: list[str]) -> str:
 
 def _patch_tools_config(config: dict, patch: dict | None) -> dict:
     """Per-run overrides for the `tools:` config section (run_overrides
-    "tools_patch": {<namespace>: {<key>: <value>}}). Returns a shallow copy
-    with a deep-copied tools section — the shared runtime config is never
-    mutated. Used by the eval harness to redirect persistent stores (memory,
-    rag) at a per-case sandbox."""
+    "tools_patch": {<namespace>: {<key>: <value>}}). Copies the tools section
+    shallowly and only patched namespaces deeply — the shared runtime config is
+    never mutated. Used by the eval harness to redirect persistent stores."""
     if not patch:
         return config
     import copy
     cfg = dict(config)
-    tools = copy.deepcopy(config.get("tools") or {})
+    tools = dict(config.get("tools") or {})
     for ns, kv in patch.items():
         if isinstance(kv, dict):
-            merged = tools.get(ns) or {}
+            merged = copy.deepcopy(tools.get(ns) or {})
             merged.update(kv)
             tools[ns] = merged
     cfg["tools"] = tools
@@ -518,6 +517,13 @@ def _stub_only_toolset(registry, allowed: list[str] | None) -> bool:
     return all(isinstance(by_name.get(n), RecordingStubTool) for n in allowed)
 
 
+def _maybe_brain_gate_schema_notes(tools_schema: list[dict], active: bool,
+                                   dispatch: bool) -> list[dict]:
+    """Apply gate wording at initial selection and every later schema rebuild."""
+    return (_brain_gate_schema_notes(tools_schema, dispatch=dispatch)
+            if active else tools_schema)
+
+
 def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
                      depth: int, disabled: set[str] | None) -> list[str] | None:
     """Swap the brain's coding tools for code.check under brain_mode: verify.
@@ -591,7 +597,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _parts = str(_dp).split(".")
             _d = self.config
             for _p in _parts[:-1]:
-                _d = _d.setdefault(_p, {})
+                _next = _d.get(_p)
+                if not isinstance(_next, dict):
+                    # YAML null/scalars cannot be traversed; an explicit dotted
+                    # override replaces that subtree with the requested object.
+                    _next = {}
+                    _d[_p] = _next
+                _d = _next
             _d[_parts[-1]] = _val
         from runtime.config_check import warn_unknown_sections
         warn_unknown_sections(self.config, log)
@@ -952,6 +964,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     f"this run's model has no vision; describe "
                                     f"it from the tool's text result or hand "
                                     f"image work to a vision-capable model]")})
+                if result.private:
+                    rs.private_taint.add(msg_idx + 1)
         return _mg_before
 
 
@@ -1097,7 +1111,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         await self._assemble_messages(
             rs, st, user_message=user_message, history=history, images=images,
             depth=depth, extra_system=extra_system, work_root=work_root,
-            run_tmp=_run_tmp, base_system=base_system)
+            run_tmp=_run_tmp, base_system=base_system, run_config=run_config)
         # Per-run bookkeeping fields (private_taint, recent_calls,
         # trajectory, proc_*, ...) init via their RunState dataclass defaults
         # — see runtime/run_state.py.
@@ -1107,6 +1121,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # is what preserves prompt-cache hits across iterations (see guide §3.7).
         # Bounded exception: tools.load may expand the set mid-run (see the
         # ctx.expand_tools seam below) when this initial guess missed.
+        disabled_tools = set(disabled_tools or ())
         # Role policy (security.admin_only_tools): a non-admin run never sees
         # these tools — the filter rides the same `disabled_tools` channel as
         # the global admin disable list (selection, tools.load expansion and
@@ -1114,7 +1129,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # anyway is refused at dispatch below (_admin_only_names).
         _admin_only_names: set[str] = set()
         if not is_admin:
-            _patterns = _admin_only_patterns(self.config)
+            _patterns = _admin_only_patterns(run_config)
             if _patterns:
                 _admin_only_names = {t.name for t in self.registry.all()
                                      if _tool_policy_match(t.name, _patterns)}
@@ -1128,19 +1143,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # matching, bounded so a long chat can't widen the toolset without
         # limit (see _history_hint).
         from runtime.preset_store import profile_for
-        tool_mode = profile_for(self.config, eff_model).get("tool_selection")
+        tool_mode = profile_for(run_config, eff_model).get("tool_selection")
         rs.allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools,
                                        history_hint=_history_hint(
-                                           self.config, history) or None,
+                                           run_config, history) or None,
                                        mode=tool_mode)
         # Brain-only: under tools.code.brain_mode=verify with a coding
         # specialist present, swap code.run/execute/patch for code.check —
         # implementation routes through specialist.delegate mechanically. The same
         # predicate also bars tools.load from re-adding them mid-run.
-        brain_gate = _brain_gate_active(self.config, depth)
-        dispatch_gate = _brain_dispatch_active(self.config, depth)
-        rs.allowed = _brain_code_gate(self.config, self.registry, rs.allowed,
+        brain_gate = _brain_gate_active(run_config, depth)
+        dispatch_gate = _brain_dispatch_active(run_config, depth)
+        rs.allowed = _brain_code_gate(run_config, self.registry, rs.allowed,
                                    depth, disabled_tools)
         # /goal: a supervised run carries a declaration sink in run_overrides
         # (web/goals.py). The two verdict tools must be reachable even when the
@@ -1174,9 +1189,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.tools_schema = _apply_schema(
             self.registry.openai_schemas(rs.allowed),
             _ro.get("tool_descriptions"))
-        if brain_gate:
-            rs.tools_schema = _brain_gate_schema_notes(rs.tools_schema,
-                                                    dispatch=dispatch_gate)
+        rs.tools_schema = _maybe_brain_gate_schema_notes(
+            rs.tools_schema, brain_gate, dispatch_gate)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
             "requested": tools,
@@ -1193,7 +1207,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # possibly-downgraded think flag).
         think = await self._apply_brain_nudges(
             rs, user_message=user_message, depth=depth, brain_gate=brain_gate,
-            think=think, emit=emit, run_overrides=_ro)
+            think=think, emit=emit, run_overrides=_ro, run_config=run_config)
 
         # Token emitter: forwards streamed deltas as `token` events. scope is
         # "brain" for the orchestrator model, or a tool name (e.g. "llm.call").
@@ -1300,6 +1314,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rs.tools_schema = _apply_schema(
                 self.registry.openai_schemas(rs.allowed),
                 _ro.get("tool_descriptions"))
+            rs.tools_schema = _maybe_brain_gate_schema_notes(
+                rs.tools_schema, brain_gate, dispatch_gate)
             rs.expansions_used += 1
             await emit("tool_selection", rs.budget.iterations, {
                 "mode": "expanded", "added": added, "count": len(rs.tools_schema)})
@@ -1615,6 +1631,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         *[self._execute_tool(p["name"], p["args"], ctx) for p in pending],
                         return_exceptions=True)
                     for p, r in zip(pending, gathered):
+                        if isinstance(r, asyncio.CancelledError):
+                            raise r
                         p["result"] = (
                             ToolResult(status="error", result=None, tool_name=p["name"],
                                        error=f"{type(r).__name__}: {r}")
@@ -2197,7 +2215,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
     async def _assemble_messages(self, rs, st, *, user_message, history,
                                  images, depth, extra_system, work_root,
-                                 run_tmp, base_system) -> None:
+                                 run_tmp, base_system, run_config=None) -> None:
         """Build rs.messages: system prompt, replayed history, datetime note,
         user turn (text or image blocks).
 
@@ -2209,7 +2227,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         system_content = await self._system_prompt(
             extra_system=extra_system, work_root=work_root, run_tmp=run_tmp,
             depth=depth, eff_threshold=st.architect_threshold,
-            run_overrides=st.run_overrides, base_system=base_system)
+            run_overrides=st.run_overrides, base_system=base_system,
+            run_config=run_config)
         rs.messages = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
@@ -2256,7 +2275,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
     async def _apply_brain_nudges(self, rs, *, user_message, depth,
                                   brain_gate, think, emit,
-                                  run_overrides=None) -> bool:
+                                  run_overrides=None, run_config=None) -> bool:
         """Depth-0 prompt-tail additions + the adaptive-thinking downgrade.
 
         Returns the (possibly downgraded) think flag.
@@ -2285,7 +2304,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "build checks, small python computations). Building, "
                     "fixing, installing and long dev loops go to "
                     "specialist.delegate.")})
-            _nudge, _route_meta = await self._routing_nudge(user_message)
+            _nudge, _route_meta = await self._routing_nudge(
+                user_message, config=run_config)
             if _route_meta:
                 # Route telemetry: every depth-0 run logs the routing
                 # source (plugin / keyword / none), the tag, confidence and
@@ -2297,7 +2317,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # Trusted attachment/size/diagnosis signals load instructions without
             # waiting for the brain to discover them. No tools are auto-executed.
             from runtime.skill_gate import autoload_payload, initial_skill_choices, render_autoload
-            _skill_cfg = ((self.config.get("agent") or {})
+            _skill_cfg = (((run_config or self.config).get("agent") or {})
                           .get("skill_autoload") or {})
             if _skill_cfg.get("enabled", True):
                 _disabled = (run_overrides or {}).get("disabled_skills") or ()
@@ -2339,7 +2359,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # no tool keywords — conversational) skips chain-of-thought to save
         # prefill + first-token latency. Only downgrades think=True → False;
         # an explicit think=False upstream (voice, UI toggle) is already off.
-        if think and (self.config.get("orchestrator") or {}).get("adaptive_thinking"):
+        if think and ((run_config or self.config).get("orchestrator") or {}).get("adaptive_thinking"):
             if (getattr(self.selector, "_diag", None) or {}).get("trivial"):
                 think = False
                 await emit("progress", 0, {"label": "thinking: off (trivial request)",
@@ -2349,14 +2369,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # model will actually think (voice/trivial runs stay lean).
             from runtime import caveman as _caveman
             rs.messages[0]["content"] += _caveman.instruction(
-                self.config, "reasoning")
+                run_config or self.config, "reasoning")
         return think
 
     async def _system_prompt(self, *, extra_system: str | None,
                              work_root: str | None, run_tmp: Path,
                              depth: int, eff_threshold: int,
                              run_overrides: dict,
-                             base_system: str | None = None) -> str:
+                             base_system: str | None = None,
+                             run_config: dict | None = None) -> str:
         """Assemble the system prompt for a run.
 
         Everything in here is semi-static (base prompt, skill catalog,
@@ -2374,9 +2395,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         dispatcher prompt — picked PER RUN via the gate's own predicate, so
         live slot moves / config edits can't split the two (audit 2026-10-12).
         """
+        config = run_config or self.config
         if base_system is not None:
             system_content = base_system
-        elif depth == 0 and _brain_dispatch_active(self.config, depth):
+        elif depth == 0 and _brain_dispatch_active(config, depth):
             # getattr: the test harness builds AgentRuntime via __new__ and
             # never runs the init that sets dispatch_prompt.
             _dsp: str | None = getattr(self, "dispatch_prompt", None)
@@ -2441,11 +2463,27 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Skipped in worker mode (base_system set): routing info is brain
         # doctrine — a worker must never route, and skipping both blocks keeps
         # the worker prefix stable across slot churn (cache-friendly).
+        _probe_results: list = []
         try:
             from tools.model.catalog import live_slot as _live_slot
-            _slot = await _live_slot(self.config) if base_system is None else None
+
+            async def _probe(slot=None):
+                try:
+                    return await (_live_slot(config) if slot is None
+                                  else _live_slot(config, slot=slot))
+                except Exception:
+                    return None
+
+            if base_system is None:
+                # Cold probes used to serialize run startup behind four health
+                # checks. Each keeps its own failure fallback; task cancellation
+                # still propagates through gather normally.
+                _probe_results = list(await asyncio.gather(
+                    _probe(), _probe("specialist"),
+                    _probe("specialist2"), _probe("specialist3")))
         except Exception:
-            _slot = None
+            _probe_results = []
+        _slot = _probe_results[0] if _probe_results else None
         if _slot:
             _str = ", ".join(_slot.get("strengths") or []) or "unknown"
             system_content += (f"\n\nSpecialist model: {_slot['serving']} "
@@ -2456,16 +2494,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Same TTL-cached probes as the slot line: semi-static, cacheable.
         try:
             from tools.model.catalog import strength_registry as _sreg
-            _reg = _sreg(self.config) if base_system is None else None
+            _reg = _sreg(config) if base_system is None else None
         except Exception:
             _reg = None
         if _reg:
             _live: dict[str, str] = {}
-            for _sn in ("specialist", "specialist2", "specialist3"):
-                try:
-                    _s = await _live_slot(self.config, slot=_sn)
-                except Exception:
-                    _s = None
+            for _s in _probe_results[1:]:
                 if _s and _s.get("alias"):
                     for _tag in (_s.get("strengths") or []):
                         _live.setdefault(_tag, _s["alias"])
@@ -2562,23 +2596,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     return missing
         return missing
 
-    async def _strength_route_note(self, tag: str) -> str | None:
+    async def _strength_route_note(self, tag: str, config: dict | None = None) -> str | None:
         """Routing sentence for one strength tag: delegate live when a
         specialist holding the tag is up, else a swap-in hint when a tagged
         preset exists but isn't live. None when neither applies."""
+        config = config or self.config
         try:
             from tools.model.catalog import route_strength, tagged_presets
         except Exception:
             return None
         try:
-            live = await route_strength(self.config, tag)
+            live = await route_strength(config, tag)
         except Exception:
             live = None
         if live:
             return (f"This smells like {tag} work — delegate with "
                     f"strength=\"{tag}\" (`{live}` holds that tag live).")
         try:
-            holders = [h for h in tagged_presets(self.config, tag)
+            holders = [h for h in tagged_presets(config, tag)
                        if tag in (h.get("strengths") or [])]
         except Exception:
             holders = []
@@ -2589,7 +2624,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     f"(swap=true): {names}.")
         return None
 
-    async def _routing_nudge(self, user_message: str) -> tuple[str | None, dict]:
+    async def _routing_nudge(self, user_message: str,
+                             config: dict | None = None) -> tuple[str | None, dict]:
         """Per-run routing note, placed right before the user turn.
 
         The gate prompt's Route-don't-do doctrine is a STANDING instruction;
@@ -2607,7 +2643,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         telling the brain to delegate a non-coding request derails it.
         Config: tool_selection.routing_nudge (enabled, code_keywords,
         strength_keywords). Note None when nothing route-worthy fired."""
-        cfg = ((self.config.get("tool_selection") or {})
+        cfg = (((config or self.config).get("tool_selection") or {})
                .get("routing_nudge") or {})
         if cfg.get("enabled") is False:
             return None, {}
@@ -2627,7 +2663,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _t0 = time.monotonic()
             from runtime import hooks as _hooks
             for hit in await asyncio.to_thread(
-                    _hooks.fire, "route_request", user_message, self.config):
+                    _hooks.fire, "route_request", user_message,
+                    config or self.config):
                 routed = hit
                 if routed:
                     break
@@ -2683,7 +2720,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if hook_conf is not None:
                 meta["confidence"] = round(hook_conf, 3)
             meta["latency_ms"] = hook_ms
-            note = await self._strength_route_note(hook_tag)
+            note = await self._strength_route_note(hook_tag, config=config)
             if note:
                 parts.append(note)
                 return ("Routing note for THIS request: "
@@ -2692,7 +2729,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # keyword notes still build; telemetry keeps the hook's pick.
             meta["note_source"] = "keyword"
         if kw_tags:
-            meta["tag"] = kw_tags[0]
+            meta.setdefault("tag", kw_tags[0])
         if "coding" in kw_tags:
             parts.append(
                 "This request is coding work — Route, don't do applies: your "
@@ -2702,7 +2739,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         for tag in kw_tags:
             if tag == "coding":
                 continue
-            note = await self._strength_route_note(tag)
+            note = await self._strength_route_note(tag, config=config)
             if note:
                 parts.append(note)
         if not parts:
@@ -2761,7 +2798,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
     # ---------- Internal helpers ----------
 
     async def _confirm(self, name: str, args: dict, run_id: str,
-                       auto_confirm: bool, emit, confirm_provider=None) -> bool:
+                       auto_confirm: bool, emit, confirm_provider=None,
+                       config: dict | None = None) -> bool:
         """Ask a human to approve a confirmation-required tool call.
 
         Whether to ask is driven by the `confirmation` block in runtime.yaml:
@@ -2775,7 +2813,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         preserving the CLI behaviour.
         """
         import sys
-        cfg = self.config.get("confirmation", {}) or {}
+        cfg = (config or self.config).get("confirmation", {}) or {}
         if not cfg.get("enabled", True):
             return True
         if auto_confirm:
@@ -2798,16 +2836,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 approved = ans.strip().lower() in ("y", "yes")
             except (EOFError, KeyboardInterrupt):
                 approved = False
+            decision_src = "tty"
         await emit("confirmation", 0, {"tool": name, "approved": approved, "via": decision_src})
         return approved
 
     async def _confirm_privacy(self, name: str, args: dict, run_id: str,
-                               emit, confirm_provider=None) -> bool:
+                               emit, confirm_provider=None,
+                               config: dict | None = None) -> bool:
         """Human decision for a privacy-blocked cloud call (private results in
         context). Asks through the provider when one is attached and the
         confirmation system is enabled; refuses otherwise (non-interactive run,
         gate disabled) — never auto-approves."""
-        cfg = self.config.get("confirmation", {}) or {}
+        cfg = (config or self.config).get("confirmation", {}) or {}
         if confirm_provider is None or not cfg.get("enabled", True):
             return False
         reason = ("privacy: this run already saw private tool results — approving "
@@ -3033,12 +3073,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   if context_recovery else PARTIAL_SYNTHESIS_MARKER)
         return marker + "\n\n" + text
 
-    def _tool_call_timeout(self, name: str) -> float:
+    def _tool_call_timeout(self, name: str, config: dict | None = None) -> float:
         """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool
         overrides win over the default. Tools that orchestrate sub-agents are set
         to 0 in config — they're bounded by the budget through their children, so a
         wrapper timeout would wrongly kill them mid-orchestration."""
-        tcfg = self.config.get("tools", {}) or {}
+        tcfg = (config or self.config).get("tools", {}) or {}
         ov = tcfg.get("call_timeout_overrides") or {}
         if name not in ov and name in _DELEGATE_TOOLS:
             # Rename compat: an override written for one delegate name covers
@@ -3059,7 +3099,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             return ToolResult(status="error", result=None, tool_name=name,
                               error=f"unknown tool: {name}")
         start = time.monotonic()
-        timeout = self._tool_call_timeout(name)
+        timeout = self._tool_call_timeout(
+            name, config=getattr(ctx, "config", None))
         try:
             # Structural backstop: no single tool call may exceed its hard timeout,
             # regardless of whether the tool bounds its own I/O. On timeout the call
@@ -3084,15 +3125,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             result.tool_name = name
         if not result.latency_ms:
             result.latency_ms = int((time.monotonic() - start) * 1000)
-        result.private = tool.private
+        # Tools may dynamically mark a sensitive result private even when
+        # their class-level default is public; never erase that taint here.
+        result.private = bool(result.private or tool.private)
         return result
 
-    def _is_cloud_call(self, name: str, args: dict) -> bool:
+    def _is_cloud_call(self, name: str, args: dict,
+                       config: dict | None = None) -> bool:
         """True if this tool CALL would reach a remote/cloud LLM — the
         remote_llm_tools membership check plus the resolved destination
         alias, so a local-target llm.call (local-specialist, the vision
         slot for image calls) never gates (cloud_gate.remote_call_is_cloud)."""
-        return cloud_gate.remote_call_is_cloud(name, args, self.config)
+        return cloud_gate.remote_call_is_cloud(name, args, config or self.config)
 
     @staticmethod
     def _call_signature(name: str, args: dict) -> str:

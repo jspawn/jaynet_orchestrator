@@ -466,7 +466,8 @@ class DispatchGateContext:
         ok = await self.runtime._confirm(
             "ledger.commit", {"message": msg, "cwd": str(work_root),
                               "stages": preview[:2000]},
-            self.run_id, self.auto_confirm, self.emit, self.confirm_provider)
+            self.run_id, self.auto_confirm, self.emit, self.confirm_provider,
+            config=self.ctx.config)
         if not ok:
             self.rs.todo_list.record_check("item", it["id"], verified=True,
                                            note="verified — commit declined")
@@ -1237,12 +1238,13 @@ class PrivacyGate(DispatchGate):
         d = self.dctx
         name = plan["name"]
         args = plan["args"]
-        off_box = (d.runtime._is_cloud_call(name, args)
+        off_box = (d.runtime._is_cloud_call(name, args, config=d.ctx.config)
                    or name.startswith(self._WEB_PREFIXES))
         if d.share_private or not rs.private_taint or not off_box:
             return False
         if not await d.runtime._confirm_privacy(name, args, d.run_id, d.emit,
-                                                d.confirm_provider):
+                                                d.confirm_provider,
+                                                config=d.ctx.config):
             plan["result"] = ToolResult(
                 status="error", result=None, tool_name=name,
                 error="blocked by privacy: the conversation contains "
@@ -1267,15 +1269,17 @@ class ConfirmationGate(DispatchGate):
         name = plan["name"]
         args = plan["args"]
         tool_obj = d.runtime.registry.get(name)
-        confirm_cloud = (d.runtime.config.get("confirmation", {}) or {}
+        confirm_cloud = (d.ctx.config.get("confirmation", {}) or {}
                          ).get("confirm_cloud_calls", True)
         needs_confirm = (
             (tool_obj is not None and tool_obj.needs_confirmation(args, d.ctx))
-            or (confirm_cloud and d.runtime._is_cloud_call(name, args)))
+            or (confirm_cloud and d.runtime._is_cloud_call(
+                name, args, config=d.ctx.config)))
         if (needs_confirm and not plan.get("privacy_ok")
                 and not await d.runtime._confirm(name, args, d.run_id,
                                                  d.auto_confirm, d.emit,
-                                                 d.confirm_provider)):
+                                                 d.confirm_provider,
+                                                 config=d.ctx.config)):
             plan["result"] = ToolResult(
                 status="error", result=None, tool_name=name,
                 error="declined: human did not approve this tool call")

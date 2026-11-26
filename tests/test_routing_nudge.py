@@ -11,7 +11,7 @@ import yaml
 from runtime.loop import AgentRuntime
 
 
-def _rt(tmp_path, extra_cfg=None):
+def _rt(tmp_path, extra_cfg=None, overrides=None):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "sys.md").write_text("SYS")
     cfg = {
@@ -27,7 +27,7 @@ def _rt(tmp_path, extra_cfg=None):
     cdir = tmp_path / "config"
     cdir.mkdir(exist_ok=True)
     (cdir / "runtime.yaml").write_text(yaml.safe_dump(cfg))
-    return AgentRuntime(cdir / "runtime.yaml")
+    return AgentRuntime(cdir / "runtime.yaml", config_overrides=overrides)
 
 
 @pytest.mark.asyncio
@@ -203,6 +203,24 @@ async def test_route_request_raising_hook_is_swallowed(tmp_path):
         assert (await rt._routing_nudge("what is the capital of France?"))[0] is None
     finally:
         hooks.clear()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_hook_tag_remains_telemetry_pick(tmp_path, _hook_cleanup):
+    from runtime import hooks
+    hooks.register("route_request", lambda msg, cfg: "research")
+    rt = _rt(tmp_path)                         # no research preset/live route
+    note, meta = await rt._routing_nudge("implement a parser and fix this code")
+    assert note is not None and "coding work" in note
+    assert meta["tag"] == "research"
+    assert meta["note_source"] == "keyword"
+    assert meta["keyword_tags"] == ["coding"]
+
+
+def test_dotted_override_replaces_null_intermediate(tmp_path):
+    rt = _rt(tmp_path, {"security": None},
+             overrides={"security.admin_only_tools": ["custom.tool"]})
+    assert rt.config["security"] == {"admin_only_tools": ["custom.tool"]}
 
 
 # ---- route_decision telemetry (audit #23 follow-up) ------------------------

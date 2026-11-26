@@ -490,6 +490,26 @@ def test_prompt_strength_directory_with_live_holders(monkeypatch):
     assert "security = security research, pentesting (not live)" in system
 
 
+def test_prompt_slot_probes_run_concurrently(monkeypatch):
+    active = 0
+    max_active = 0
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return None
+
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+    rt, _ = _runtime(_Registry([]), [_final("ok")])
+    rt.config["models"] = {**CFG["models"],
+                           "strengths": {"coding": "code synthesis"}}
+    asyncio.run(rt.run("hi"))
+    assert max_active == 4
+
+
 def test_prompt_strength_directory_absent_without_registry(monkeypatch):
     """No models.strengths configured → no directory (CFG has none)."""
     _patch_slot(monkeypatch, {"preset": "s", "serving": "qwen27b",
