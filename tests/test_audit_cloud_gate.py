@@ -59,6 +59,21 @@ def test_spawn_gate_decision():
     assert g("glm-5.2", off, private_taint=False, share_private=False) is None
     # ...but the privacy gate does not depend on that switch.
     assert g("glm-5.2", off, private_taint=True, share_private=False) == "privacy"
+    # A default cloud brain must not bypass the gate when model=None.
+    cloud_default = {**_LOCAL_CFG, "orchestrator": {
+        **_LOCAL_CFG["orchestrator"], "model": "glm-5.2"}}
+    assert g(None, cloud_default, private_taint=True,
+             share_private=False) == "privacy"
+    assert g(None, cloud_default, private_taint=False,
+             share_private=False) == "confirm"
+
+
+def test_internal_alias_of_local_preset_is_local():
+    from runtime.preset_store import internal_preset_alias
+    cfg = {"orchestrator": {"local_concurrency": {"custom-backend": 2}},
+           "models": {"presets": {"brain-x": {"alias": "custom-backend"}}}}
+    assert cloud_gate.is_local_alias(internal_preset_alias("brain-x"), cfg)
+    assert not cloud_gate.is_local_alias("custom-other", cfg)
 
 
 def test_privacy_refusal_for_tools(ctx):

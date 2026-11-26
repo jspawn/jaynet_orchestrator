@@ -13,19 +13,25 @@ loop's two gate semantics:
   2. confirmation.confirm_cloud_calls -> human approval before the call
      (tools via their `needs_confirmation` override, ctx.spawn inline).
 
-Local aliases never gate. "Local" = the `local-*` prefix OR a key of
-`orchestrator.local_concurrency` — the same source the loop's
-`AgentRuntime._local_aliases` is derived from. Unknown/empty aliases are NOT
-local: the gate fails closed.
+Local aliases never gate. "Local" = the `local-*` prefix, a key of
+`orchestrator.local_concurrency`, or the internal alias of a preset whose
+concrete deployment is local — mirroring `AgentRuntime._local_aliases`.
+Unknown/empty aliases are NOT local: the gate fails closed.
 """
 
 from __future__ import annotations
 
 
 def local_aliases(config: dict) -> frozenset:
-    """Configured local LiteLLM aliases: the orchestrator.local_concurrency
-    keys (same source as AgentRuntime._local_aliases / _local_concurrency)."""
-    return frozenset(((config.get("orchestrator") or {}).get("local_concurrency")) or {})
+    """Local aliases, including internal aliases of local preset deployments."""
+    aliases = set(((config.get("orchestrator") or {}).get("local_concurrency")) or {})
+    from runtime.preset_store import internal_preset_alias
+    for name, preset in ((config.get("models") or {}).get("presets") or {}).items():
+        # Mirror AgentRuntime.__init__: an internal alias is local only when
+        # its concrete deployment has a local-concurrency entry.
+        if preset.get("alias") in aliases:
+            aliases.add(internal_preset_alias(name))
+    return frozenset(aliases)
 
 
 def is_local_alias(alias: str | None, config: dict) -> bool:
@@ -69,6 +75,7 @@ def spawn_gate(model: str | None, config: dict, *, private_taint: bool,
     local target (no gate), "privacy" when the run is tainted and sharing is
     not allowed (needs the privacy confirmation, never auto-approved), or
     "confirm" when confirm_cloud_calls requires a standard approval."""
+    model = model or (config.get("orchestrator") or {}).get("model")
     if not model or is_local_alias(model, config):
         return None
     if private_taint and not share_private:

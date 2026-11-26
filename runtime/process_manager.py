@@ -2,6 +2,8 @@
 
 Launches long-running services (brain, embedding, reranker) as child processes,
 captures their stdout/stderr into bounded ring buffers, and restarts on crash.
+Commands are shlex-split argv, never shell command lines; environment overrides
+belong in the process's env mapping.
 
 Usage:
     pm = ProcessManager()
@@ -15,9 +17,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import codecs
 import collections
 import os
 import re
+import shlex
 import signal
 import time
 from dataclasses import dataclass, field
@@ -187,7 +191,10 @@ class ProcessManager:
             try:
                 await self._spawn(mp)
                 await self._read_output(mp)
-                # Process exited
+                # EOF alone does not set returncode. Reap before restart logic
+                # so a reader failure can never duplicate a still-live process.
+                if mp.proc:
+                    await mp.proc.wait()
                 code = mp.proc.returncode if mp.proc else -1
                 mp.log.append(f"[pm] process exited with code {code}")
                 if mp._stopping or not mp.restart:
@@ -217,28 +224,42 @@ class ProcessManager:
     async def _spawn(self, mp: ManagedProcess) -> None:
         env = {**os.environ, **mp.env}
         mp.log.append(f"[pm] starting: {mp.command[:200]}")
-        mp.proc = await asyncio.create_subprocess_shell(
-            mp.command,
+        argv = shlex.split(mp.command)
+        if not argv:
+            raise ValueError("empty managed-process command")
+        mp.proc = await asyncio.create_subprocess_exec(
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # merge stderr into stdout
             env=env,
             cwd=mp.cwd,
-            preexec_fn=os.setsid,  # new process group for clean kill
+            start_new_session=True,       # process group without preexec_fn
+            limit=1024 * 1024,            # reader capacity; output uses chunks
         )
         mp.started_at = time.time()
         mp.log.append(f"[pm] started pid={mp.proc.pid}")
 
     async def _read_output(self, mp: ManagedProcess) -> None:
         assert mp.proc and mp.proc.stdout
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
         while True:
             try:
-                line = await mp.proc.stdout.readline()
-            except (asyncio.CancelledError, Exception):
+                chunk = await mp.proc.stdout.read(65536)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                mp.log.append(f"[pm] stdout reader error: {e}")
                 break
-            if not line:
+            if not chunk:
                 break  # EOF — process exited
-            text = line.decode("utf-8", errors="replace").rstrip("\n")
-            mp.log.append(text)
+            text = pending + decoder.decode(chunk)
+            *lines, pending = text.split("\n")
+            for line in lines:
+                mp.log.append(line.rstrip("\r"))
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            mp.log.append(pending.rstrip("\r"))
 
     async def _kill(self, mp: ManagedProcess) -> None:
         if mp.proc and mp.proc.returncode is None:
@@ -253,6 +274,12 @@ class ProcessManager:
             except TimeoutError:
                 mp.log.append("[pm] force kill after timeout")
                 try:
-                    mp.proc.kill()
-                except Exception:
-                    pass
+                    # The shell/wrapper may be dead while its server children
+                    # survive. Escalate against the whole process group.
+                    os.killpg(os.getpgid(mp.proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    try:
+                        mp.proc.kill()
+                    except Exception:
+                        pass
+                await mp.proc.wait()

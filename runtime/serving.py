@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import signal
 import socket
@@ -79,7 +80,14 @@ def pid_start_time(pid: int | None) -> int | None:
 # ----------------------------- registry --------------------------------------
 
 def _server_dir(state_dir: str | Path, name: str) -> Path:
-    return Path(state_dir) / name
+    name = str(name)
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or name in (".", ".."):
+        raise ValueError(f"invalid server name: {name!r}")
+    root = Path(state_dir).resolve()
+    d = (root / name).resolve()
+    if d.parent != root:
+        raise ValueError(f"server name escapes state directory: {name!r}")
+    return d
 
 
 def read_server(state_dir: str | Path, name: str) -> dict | None:
@@ -320,8 +328,16 @@ def stop_server(entry: dict, grace_s: float = 6.0) -> bool:
 
 
 def tail(path: str | Path, n: int = 20) -> str:
+    """Return the newest lines after reading at most the final 64 KiB."""
     try:
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        with Path(path).open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 65536))
+            raw = f.read()
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        if size > 65536 and lines:
+            lines = lines[1:]               # discard a partial first line
         return "\n".join(lines[-n:])
     except OSError:
         return ""

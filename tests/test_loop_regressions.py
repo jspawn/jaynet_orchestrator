@@ -4536,6 +4536,11 @@ def test_auto_delegate_fires_on_refusal_streak(monkeypatch):
     fired = [e for e in events if e["type"] == "auto_delegate"]
     assert len(fired) == 1 and fired[0]["data"]["status"] == "ok"
     assert _auto_delegate_msgs(seen), "the specialist report must reach history"
+    transcript = seen[-1]
+    note_idx = next(i for i, m in enumerate(transcript)
+                    if "[loop guard] Blocked-call streak" in (m.get("content") or ""))
+    assert transcript[note_idx - 1]["role"] == "tool", (
+        "the auto-delegate note must follow the current turn's tool results")
     tool_txt = [m["content"] for m in msgs]
     assert any("stalled (stall_hard_stop guard)" in c for c in tool_txt), \
         "the first refusal stays verbose"

@@ -33,6 +33,9 @@ class RunState:
     # The growing transcript (system, replayed history, user, assistant,
     # tool results, nudges) — re-sent to the model every turn.
     messages: list[dict] = field(default_factory=list)
+    # System notes produced by dispatch gates. They join the transcript only
+    # after the current assistant turn's tool messages have been recorded.
+    deferred_messages: list[dict] = field(default_factory=list)
     # Frozen tool allowlist for the run (None = all tools).
     allowed: list[str] | None = None
     # Per-run vision: whether THIS run's serving model may receive image_url

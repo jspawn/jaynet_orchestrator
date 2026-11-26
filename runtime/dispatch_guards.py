@@ -135,12 +135,12 @@ class DispatchGateContext:
         fallbacks. Shared by the stuck-delegate directive and the
         auto-delegate hand-over."""
         rs = self.rs
-        msg = self.user_message if isinstance(self.user_message, str) else ""
+        msg = (self.user_message if isinstance(self.user_message, str) else "").lower()
         _skw = (((self.runtime.config.get("tool_selection") or {})
                  .get("routing_nudge") or {}).get("strength_keywords")
                 or _DEFAULT_STRENGTH_KEYWORDS)
         cands = [tag for tag, kws in _skw.items()
-                 if any(_strength_kw_hit(k, msg) for k in kws)]
+                 if any(_strength_kw_hit(str(k).lower(), msg) for k in kws)]
         if rs.inline_writes > rs.web_calls:
             cands.append("coding")
         if rs.web_calls:
@@ -292,7 +292,7 @@ class DispatchGateContext:
                 rs.delegate_turn = rs.budget.iterations
         report = (result.to_model_message()[:4000] if ok
                   else f"delegation failed: {result.error}")
-        rs.messages.append({"role": "system", "content": (
+        rs.deferred_messages.append({"role": "system", "content": (
             "[loop guard] Blocked-call streak — the harness delegated the "
             f"remaining work to the {tag} specialist itself.\n"
             f"Specialist report:\n{report}\n"

@@ -517,6 +517,13 @@ def _stub_only_toolset(registry, allowed: list[str] | None) -> bool:
     return all(isinstance(by_name.get(n), RecordingStubTool) for n in allowed)
 
 
+def _flush_deferred_messages(rs) -> None:
+    """Append dispatch-gate notes after the current turn's tool messages."""
+    if rs.deferred_messages:
+        rs.messages.extend(rs.deferred_messages)
+        rs.deferred_messages.clear()
+
+
 def _maybe_brain_gate_schema_notes(tools_schema: list[dict], active: bool,
                                    dispatch: bool) -> list[dict]:
     """Apply gate wording at initial selection and every later schema rebuild."""
@@ -966,6 +973,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     f"image work to a vision-capable model]")})
                 if result.private:
                     rs.private_taint.add(msg_idx + 1)
+        # Auto-delegation runs inside dispatch, before this turn's tool
+        # results exist. Its note must follow those results or strict
+        # OpenAI chat templates reject assistant(tool_calls) → system → tool.
+        _flush_deferred_messages(rs)
         return _mg_before
 
 

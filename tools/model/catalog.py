@@ -23,6 +23,7 @@ restores the evicted set after the child run (models.swap_back).
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from runtime import serving as S
@@ -966,7 +967,8 @@ class ModelList(Tool):
         from runtime.preset_store import gpu_list
         for g in _gpus(ctx):
             active_here = [r["preset"] for r in rows if g in gpu_list(r) and r["live"]]
-            gpus.append({"gpu": g, "free_gib": S.gpu_free_gib(ctx, g),
+            free = await asyncio.to_thread(S.gpu_free_gib, ctx, g)
+            gpus.append({"gpu": g, "free_gib": free,
                          "presets_here": [r["preset"] for r in rows if g in gpu_list(r)],
                          "active": active_here[0] if active_here else None})
         return ToolResult(status="ok", tool_name=self.name, result={
@@ -1215,7 +1217,7 @@ class ModelUse(Tool):
                     "gpu": s.get("gpu"), "port": s.get("port")})
         target = None
         for g in _gpus(ctx):
-            fr = S.gpu_free_gib(ctx, g)
+            fr = await asyncio.to_thread(S.gpu_free_gib, ctx, g)
             if fr is None or fr >= need + floor:
                 target = g
                 break

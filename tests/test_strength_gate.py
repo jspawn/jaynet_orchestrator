@@ -4,8 +4,10 @@ rejected until the first specialist.delegate — the routing nudge asks, the gat
 enforces. Never fires without a live route. Real loop, fake model."""
 import asyncio
 import json
+from types import SimpleNamespace
 
 import tools.model.catalog as catalog
+from runtime.dispatch_guards import DispatchGateContext
 from runtime.tool_base import ToolResult
 from tests.test_loop_regressions import _final, _Registry, _runtime, _tc
 
@@ -152,3 +154,13 @@ def test_gate_disabled_in_config(monkeypatch):
     out = asyncio.run(rt.run(SECURITY_TASK))
     assert out["status"] == "ok"
     assert "this is security work" not in out["trajectory"]
+
+
+def test_delegate_candidates_match_uppercase_strength_keywords():
+    ctx = SimpleNamespace(
+        user_message="Audit this endpoint for CVE exposure and SQL Injection",
+        runtime=SimpleNamespace(config={"tool_selection": {
+            "routing_nudge": {"strength_keywords": {
+                "security": ["cve", "sql injection"]}}}}),
+        rs=SimpleNamespace(inline_writes=0, web_calls=0))
+    assert DispatchGateContext._delegate_candidates(ctx)[0] == "security"
