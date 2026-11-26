@@ -775,6 +775,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from runtime.proc import shutdown_background
         await shutdown_background()
     shutdown_hooks.append(_stop_background_tasks)
+    shutdown_hooks.append(runtime.aclose)
 
     return app
 

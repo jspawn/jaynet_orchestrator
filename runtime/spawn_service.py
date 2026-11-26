@@ -42,19 +42,24 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     it = req.get("max_iterations", db.get("max_iterations", default_sub_iterations))
     wall = float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall)))
     if rem_wall:
-        wall = min(wall, rem_wall)
+        wall = rem_wall if wall <= 0 else min(wall, rem_wall)
     cost = float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost)))
     if rem_cost:
-        cost = min(cost, rem_cost)
+        cost = rem_cost if cost <= 0 else min(cost, rem_cost)
     tok = int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok)))
     if rem_tok:
-        tok = min(tok, rem_tok)
+        tok = rem_tok if tok <= 0 else min(tok, rem_tok)
     return {
         "max_cost_usd": cost,
         "max_total_tokens": tok,
         "max_iterations": int(it),
         "max_wall_clock_s": wall,
     }
+
+
+def _narrow_share_private(parent: bool, requested: bool | None) -> bool:
+    """A child may narrow but never widen the parent's privacy permission."""
+    return bool(parent) and (parent if requested is None else bool(requested))
 
 
 class _NestedConfirm:
@@ -186,7 +191,7 @@ class SpawnService:
         # radiance specialist, 2026-10-22). An explicit vision= always wins.
         if vision is None and model:
             from runtime.preset_store import vision_for_alias
-            vision = vision_for_alias(self.runtime.config, model)
+            vision = vision_for_alias(self.run_config, model)
         rs = self.rs
         emit = self.emit
         budget_obj = rs.budget
@@ -265,15 +270,14 @@ class SpawnService:
                          if self.confirm_provider is not None else None)
         child_ask = (_NestedAsk(self.ask_provider, emit, self.run_id)
                      if self.ask_provider is not None else None)
-        child_share = (share_private if share_private is not None
-                       else self.share_private)
+        child_share = _narrow_share_private(self.share_private, share_private)
         # Cloud gate (audit S1): a child on a cloud brain sends its WHOLE
         # conversation off-box, so the destination alias is gated exactly
         # like an llm.call — private-tainted run needs the privacy approval
         # (never auto-confirmed), otherwise confirm_cloud_calls decides.
         # Local aliases never gate. agent.spawn and chain `agent` steps both
         # funnel through here.
-        gate = cloud_gate.spawn_gate(model, self.runtime.config,
+        gate = cloud_gate.spawn_gate(model, self.run_config,
                                      private_taint=bool(rs.private_taint),
                                      share_private=child_share)
         if gate:
@@ -282,7 +286,7 @@ class SpawnService:
             if gate == "privacy":
                 ok = await self.runtime._confirm_privacy(
                     "agent.spawn", gate_args, self.run_id, emit,
-                    self.confirm_provider)
+                    self.confirm_provider, config=self.run_config)
                 if not ok:
                     return {"status": "error", "answer": "",
                             "error": f"blocked by privacy: the conversation contains "

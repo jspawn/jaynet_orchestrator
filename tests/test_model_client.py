@@ -7,9 +7,15 @@ second failure, stays a hard error (live: 5/118 eval cases died to this).
 """
 import asyncio
 
+import httpx
 import pytest
 
-from runtime.model_client import ContextWindowExceeded, ModelClientMixin, _is_toolcall_json_500
+from runtime.model_client import (
+    ContextWindowExceeded,
+    ModelClientMixin,
+    _is_toolcall_json_500,
+    _served_mismatch,
+)
 
 _LLAMACPP_500 = ('{"error":{"message":"litellm.InternalServerError: '
                  'OpenAIException - Failed to parse tool call arguments as '
@@ -44,6 +50,7 @@ class _FakeRT(ModelClientMixin):
         self._local_aliases = frozenset()
         self._responses = list(responses)
         self.posts = []
+        self.timeouts = []
         self._stream_responses = []
         self.stream_posts = []
 
@@ -56,10 +63,12 @@ class _FakeRT(ModelClientMixin):
         class _C:
             async def post(self, url, json=None, headers=None, timeout=None):
                 host.posts.append(json)
+                host.timeouts.append(timeout)
                 return host._responses.pop(0)
 
             def stream(self, method, url, json=None, headers=None, timeout=None):
                 host.stream_posts.append(json)
+                host.timeouts.append(timeout)
                 return _StreamCtx(host._stream_responses.pop(0))
 
         return _C()
@@ -382,3 +391,34 @@ def test_served_model_ledger_tags_active_eval_case():
                                model="local-specialist"))
     tags = [e["tag"] for e in rt._served_model_log]
     assert tags == ["case-1-abc", None]
+
+
+def test_served_mismatch_requires_path_separator_for_suffix_match():
+    assert not _served_mismatch("flash", "gemini/flash")
+    assert _served_mismatch("flash", "gemini-flash")
+    assert _served_mismatch("gpt-4", "my-gpt-4")
+    assert not _served_mismatch("gpt-4", "openai/gpt-4")
+
+
+def test_model_turn_uses_bounded_connect_timeout():
+    rt = _FakeRT([_ok()])
+    asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], []))
+    timeout = rt.timeouts[0]
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == 10.0
+    assert timeout.read == 900.0
+
+
+def test_aclose_closes_and_clears_shared_client():
+    class _Client:
+        closed = False
+
+        async def aclose(self):
+            self.closed = True
+
+    rt = _FakeRT([])
+    client = _Client()
+    rt._http = client
+    asyncio.run(rt.aclose())
+    assert client.closed is True
+    assert rt._http is None

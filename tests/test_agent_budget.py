@@ -5,6 +5,7 @@ parent's remaining allowance (cost/tokens/wall) or default_sub_iterations. Cost,
 tokens and wall are clamped to the parent's remaining so a child can't out-spend it.
 """
 from runtime.loop import _child_budget
+from runtime.spawn_service import _narrow_share_private
 
 REM_COST, REM_TOK, REM_WALL = 1.0, 500_000, 300.0
 DEFAULT_ITERS = 8
@@ -16,6 +17,22 @@ def test_no_config_no_req_falls_back_to_parent_remaining():
     assert b["max_total_tokens"] == REM_TOK
     assert b["max_wall_clock_s"] == REM_WALL
     assert b["max_iterations"] == DEFAULT_ITERS      # -> default_sub_iterations
+
+
+def test_zero_child_caps_inherit_enabled_parent_ceilings():
+    req = {"max_cost_usd": 0, "max_total_tokens": 0, "max_wall_clock_s": 0}
+    b = _child_budget(req, {}, DEFAULT_ITERS, REM_COST, REM_TOK, REM_WALL)
+    assert b["max_cost_usd"] == REM_COST
+    assert b["max_total_tokens"] == REM_TOK
+    assert b["max_wall_clock_s"] == REM_WALL
+
+
+def test_child_share_private_can_only_narrow():
+    assert _narrow_share_private(False, True) is False
+    assert _narrow_share_private(False, None) is False
+    assert _narrow_share_private(True, False) is False
+    assert _narrow_share_private(True, None) is True
+    assert _narrow_share_private(True, True) is True
 
 
 def test_config_default_budget_used_when_call_omits_budget():

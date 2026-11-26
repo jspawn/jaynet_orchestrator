@@ -819,7 +819,7 @@ def test_turn_timeout_plumbed_to_both_turn_paths(monkeypatch):
     _cfg(rt, orchestrator={"turn_timeout_s": 321})
     asyncio.run(rt._model_turn([], []))
     asyncio.run(rt._model_turn_streaming([], [], None))
-    assert seen == [321, 321]
+    assert [(t.connect, t.read) for t in seen] == [(10.0, 321.0), (10.0, 321.0)]
 
 
 def test_turn_timeout_and_stall_defaults():

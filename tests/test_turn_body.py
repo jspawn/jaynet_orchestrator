@@ -138,3 +138,17 @@ def test_system_first_merges_all_system_messages_at_index_zero():
     ]
     assert _turn_body("local-orchestrator", messages, TOOLS, None, True,
                       False)["messages"] is messages
+
+
+def test_system_first_skips_empty_system_messages():
+    messages = [
+        {"role": "system", "content": "base"},
+        {"role": "system", "content": ""},
+        {"role": "system", "content": None},
+        {"role": "system", "content": "guard"},
+        {"role": "user", "content": "work"},
+    ]
+    b = _turn_body("local-preset-flash", messages, TOOLS, None, True, False,
+                   system_first=True)
+    assert b["messages"][0] == {"role": "system", "content": "base\n\nguard"}
+    assert b["messages"][1] == {"role": "user", "content": "work"}

@@ -147,7 +147,7 @@ def _system_first_for(config: dict, model: str | None) -> bool:
 def _system_first_messages(messages: list[dict]) -> list[dict]:
     """One leading system message and defined content on every turn."""
     system = "\n\n".join(str(m.get("content") or "") for m in messages
-                         if m.get("role") == "system")
+                         if m.get("role") == "system" and m.get("content"))
     # Flash-Next's template tests `content is iterable` before checking for
     # none/undefined. Tool-only assistant turns therefore need an empty string,
     # not the null content returned by the OpenAI streaming assembly.
@@ -272,15 +272,14 @@ def _served_mismatch(requested: str | None, served: str | None) -> bool:
     judge's fallback note uses."""
     if not requested or not served:
         return False
-    return not (served == requested
-                or served.endswith("/" + requested)
-                or served.endswith(requested))
+    return not (served == requested or served.endswith("/" + requested))
 
 
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
     config: dict
+    _http: httpx.AsyncClient | None
 
     @property
     def _think_aliases(self) -> frozenset | None:
@@ -389,6 +388,13 @@ class ModelClientMixin:
             self._http = c
         return c
 
+    async def aclose(self) -> None:
+        """Close the shared connection pool during runtime/app shutdown."""
+        client = getattr(self, "_http", None)
+        if client is not None:
+            await client.aclose()
+            self._http = None
+
     def _retry_delays_s(self) -> list[float]:
         """Backoff between retried model turns on transient backend failures
         (orchestrator.transport_retry_delays_s, default [2, 5, 10]). A proxy
@@ -452,7 +458,7 @@ class ModelClientMixin:
                         f"{self.litellm_base}/v1/chat/completions",
                         json=body,
                         headers=self._auth_headers(),
-                        timeout=timeout_s or None,
+                        timeout=httpx.Timeout(timeout_s or None, connect=10.0),
                     )
             except httpx.ConnectTimeout:
                 # A TIMEOUT subclass — must precede TimeoutException: an
@@ -672,6 +678,7 @@ class ModelClientMixin:
         pend = ""
         in_think: str | None = None
         tag_pairs = _think_tag_pairs(self._think_family(model))
+        tag_map = dict(tag_pairs)
 
         async def consume(text: str):
             nonlocal pend, in_think
@@ -698,7 +705,7 @@ class ModelClientMixin:
                         content_parts.append(seg)
                         if on_token:
                             await on_token_wrapper(seg, "brain")
-                    close = dict(tag_pairs)[open_tag]
+                    close = tag_map[open_tag]
                     pend = pend[idx + len(open_tag):]
                     in_think = close
                 else:
@@ -729,7 +736,7 @@ class ModelClientMixin:
                 async with self._http_client().stream(
                     "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
                     headers=self._auth_headers(),
-                    timeout=timeout_s or None,
+                    timeout=httpx.Timeout(timeout_s or None, connect=10.0),
                 ) as r:
                     if r.status_code >= 400:
                         raw = await r.aread()
