@@ -5,6 +5,18 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.51.2 — 2026-11-26
+
+- **Test runner:** `test.run` resolves configured relative Python interpreters
+  against `JAYNET_HOME` rather than the temporary pytest workdir. Launch failures
+  now include their actual stderr instead of only a misleading "0 failed,
+  0 errors" summary.
+- **Selftest guidance:** browser extraction and screenshots run before the
+  session-closing one-shot read; cold-open timeouts get one status check before
+  retrying. Intentionally empty specialist slots are reported as skipped rather
+  than as endpoint failures.
+- **Verification:** 2,888 tests pass, plus all release gates.
+
 ## 1.51.1 — 2026-11-26
 
 - **Chat recovery:** closed SSE connections now consult the authoritative run
