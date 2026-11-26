@@ -84,7 +84,7 @@ def _experiment_content(prop: dict) -> dict:
         content = json.loads(prop.get("proposed_content") or "{}")
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid brain-overlay payload: {exc}") from exc
-    if (not isinstance(content, dict) or content.get("schema") != 1
+    if (not isinstance(content, dict) or content.get("schema") not in (1, 2)
             or not isinstance(content.get("overlay"), dict)):
         raise ValueError("invalid brain-overlay payload schema")
     if int(content.get("base_version") or 0) != int(
@@ -97,6 +97,9 @@ def _changes(runtime, prop: dict, current: dict) -> dict:
     if prop["classification"] != "brain-overlay":
         return _ordinary_changes(runtime, prop, current)
     content = _experiment_content(prop)
+    if content["schema"] == 2:
+        return harness_experiments.validate_canonical_overlay(
+            content["overlay"], runtime, allow_empty=False)
     overlay = harness_experiments.validate_overlay(
         content["overlay"], runtime, allow_empty=False)
     return brain_overlays.from_experiment(overlay)

@@ -95,8 +95,12 @@ def overlay_hash(overlay: dict) -> str:
 
 
 def from_experiment(raw: dict | None) -> dict[str, Any]:
-    """Convert the singular experiment edit shape to canonical merge changes."""
+    """Convert singular edits, or pass through a canonical carried overlay."""
     raw = raw or {}
+    config = raw.get("config") or {}
+    if (set(raw) & {"skill_additions", "tool_descriptions"}
+            or ("config" in raw and "key" not in config)):
+        return clean_overlay(raw)
     out = empty_overlay()
     if raw.get("prompt_addition"):
         out["prompt_addition"] = raw["prompt_addition"]
@@ -127,6 +131,19 @@ def merge_overlay(base: dict, changes: dict) -> dict[str, Any]:
     for key in ("tool_descriptions", "config"):
         out[key].update(changes[key])
     return clean_overlay(out)
+
+
+def stack_experiment(active: dict, experiment: dict | None) -> dict[str, Any]:
+    """Layer an experiment over the persistent overlay with run precedence."""
+    out = clean_overlay(copy.deepcopy(active))
+    carried = from_experiment(experiment)
+    if carried["prompt_addition"]:
+        out["prompt_addition"] = "\n\n".join(
+            part for part in (out["prompt_addition"], carried["prompt_addition"])
+            if part)
+    for key in ("skill_additions", "tool_descriptions", "config"):
+        out[key].update(carried[key])
+    return out
 
 
 def config_with_overlay(config: dict, overlay: dict) -> dict:
@@ -167,19 +184,17 @@ def prepare_run(config: dict, model: str, run_overrides: dict | None,
 
 
 def experiment_run_overrides(run_overrides: dict, experiment: dict) -> dict:
-    """Translate the singular experiment edits into internal run overrides."""
+    """Translate singular or carried canonical edits into run overrides."""
     out = dict(run_overrides)
-    if experiment.get("skill_addition"):
-        edit = experiment["skill_addition"]
-        out["skill_additions"] = {edit["name"]: edit["content"]}
-    if experiment.get("tool_description"):
-        edit = experiment["tool_description"]
-        out["tool_descriptions"] = {edit["name"]: edit["content"]}
-    if experiment.get("config"):
-        edit = experiment["config"]
-        section, key = edit["key"].split(".", 1)
+    overlay = from_experiment(experiment)
+    if overlay["skill_additions"]:
+        out["skill_additions"] = dict(overlay["skill_additions"])
+    if overlay["tool_descriptions"]:
+        out["tool_descriptions"] = dict(overlay["tool_descriptions"])
+    for dotted, value in overlay["config"].items():
+        section, key = dotted.split(".", 1)
         patch = dict(out.get("config_patch") or {})
-        patch[section] = {**(patch.get(section) or {}), key: edit["value"]}
+        patch[section] = {**(patch.get(section) or {}), key: value}
         out["config_patch"] = patch
     return out
 

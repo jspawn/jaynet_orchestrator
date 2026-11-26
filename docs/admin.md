@@ -513,24 +513,29 @@ applies without an admin accept.
 **Experiment** on a scripted case runs a contrastive Propose–Probe–Compose
 cycle: a baseline, an invariant candidate (general agent discipline), a
 domain-specific candidate, and the composed result. Each arm repeats 1–3 times
-under the same model and case, so this costs `4 × reps` real eval runs plus the
-editor calls. Candidates can add prompt/skill instructions, replace one tool
-description, or change one whitelisted behavioural config value. All overlays
-are run-scoped: live artifacts and the ordinary results ledger stay untouched.
-The composer may merge or revise only targets that were actually probed, or
-keep the baseline.
+under the same model and case. One or two sequential cycles are available; the
+second starts from the first composed overlay. This costs
+`4 × reps × cycles` real eval runs plus editor calls. Candidates can add
+prompt/skill instructions, replace one tool description, or change one
+whitelisted behavioural config value. All overlays are run-scoped: live
+artifacts and the ordinary results ledger stay untouched. The composer may
+merge or revise only targets probed in that cycle, or keep the current harness.
 
-The detail view keeps the diffs, trajectories, judge notes, cost and comparison
-in `eval.db`. All arms, editor and judge calls share the eval suite cost cap.
-Malformed or invalid editor output gets one correction attempt with the exact
-validation error; a second failure aborts, and every attempt stays billed.
-Artifact drift or an unmeasured arm also aborts the experiment instead of producing
-unsupported advice. One rep is exploratory; use three before treating an
-outcome as confirmed—matched runs still vary. **Create gated proposal** sends
-one atomic brain-overlay proposal to the ordinary inbox only when every arm has
-valid measured evidence; accepting it versions the whole composed edit together.
-Adaptive-driver cases are not supported because independent follow-up
-generation would break the matched condition.
+The detail view keeps every cycle's diffs, trajectories, judge notes, cost and
+comparison in `eval.db`, plus the overall initial-baseline comparison. Every
+completed cycle records a `supported`, `no_effect`, or `regression` lesson.
+Propose retrieves up to three relevant lessons by case, tags and brain;
+negative results stay available so known-bad edits are not repeated. All arms,
+editor and judge calls share the eval suite cost cap. Malformed or invalid
+editor output gets one correction attempt with the exact validation error; a
+second failure aborts, and every attempt stays billed. Artifact drift or an
+unmeasured arm also aborts instead of producing unsupported advice. One rep is
+exploratory; use three before treating an outcome as confirmed—matched runs
+still vary. **Create gated proposal** is available only for a measured overall
+improvement with valid evidence in every cycle. It sends one atomic
+brain-overlay proposal to the ordinary inbox; accepting it versions the whole
+composed edit together. Adaptive-driver cases are not supported because
+independent follow-up generation would break the matched condition.
 
 ### Benchmark
 

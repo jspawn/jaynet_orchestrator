@@ -178,7 +178,13 @@ def test_skill_load_appends_only_the_run_scoped_addition(tmp_path, monkeypatch):
     skills_cache_clear()
 
 
-def test_run_case_overlay_reaches_run_and_judge(tmp_path, monkeypatch):
+@pytest.mark.parametrize("overlay", [
+    {"prompt_addition": "CANDIDATE",
+     "tool_description": {"name": "web.search", "content": "REPLACEMENT"}},
+    {"prompt_addition": "CANDIDATE", "skill_additions": {},
+     "tool_descriptions": {"web.search": "REPLACEMENT"}, "config": {}},
+])
+def test_run_case_overlay_reaches_run_and_judge(tmp_path, monkeypatch, overlay):
     rt = _Runtime()
     rt.config["models"]["presets"]["brain-x"]["overlay"] = {
         "prompt_addition": "ACTIVE"}
@@ -193,8 +199,6 @@ def test_run_case_overlay_reaches_run_and_judge(tmp_path, monkeypatch):
 
     monkeypatch.setattr(eval_runner, "_judge", judge)
     store = EvalStore(tmp_path / "eval.db")
-    overlay = {"prompt_addition": "CANDIDATE",
-               "tool_description": {"name": "web.search", "content": "REPLACEMENT"}}
     row = run(eval_runner.run_case(
         rt, _case(), store, record=False,
         variant={"label": "experiment", "experiment_overlay": overlay}))
@@ -674,4 +678,137 @@ def test_create_proposals_independently_requires_every_measured_arm(
     with pytest.raises(ValueError, match=f"{bad_arm} arm lacks usable measured"):
         hx.create_proposals(store, exp["id"])
     assert store.proposals() == []
+    store.close()
+
+
+@pytest.mark.parametrize("base,composed,edit,outcome", [
+    ({"passed": False, "score": 3}, {"passed": True, "score": 9},
+     {"prompt_addition": "verify"}, "supported"),
+    ({"passed": True, "score": 9}, {"passed": False, "score": 3},
+     {"prompt_addition": "verify"}, "regression"),
+    ({"passed": True, "score": 9}, {"passed": True, "score": 9},
+     {"prompt_addition": "verify"}, "no_effect"),
+    ({"passed": False, "score": 3}, {"passed": False, "score": 3},
+     {}, "no_effect"),
+])
+def test_lesson_records_measured_outcome(base, composed, edit, outcome):
+    exp = hx.new_experiment(_case(), reps=1)
+    exp["brain_preset"] = "brain-x"
+    exp["baseline"].update(runs=[_measured_row("baseline", **base)],
+                           summary=hx.summarize([_measured_row("baseline", **base)]))
+    exp["composed"].update(
+        rationale="editor rationale", overlay=edit,
+        runs=[_measured_row("composed", **composed)],
+        summary=hx.summarize([_measured_row("composed", **composed)]))
+    lesson = hx._lesson(exp)
+    assert lesson["outcome"] == outcome
+    assert lesson["brain_preset"] == "brain-x"
+    assert lesson["tags"] == ["smoke"]
+    assert lesson["targets"] == (["prompt"] if edit else [])
+    if outcome == "regression":
+        assert lesson["lesson"].startswith("Rejected composed edit:")
+
+
+def test_relevant_lessons_rank_case_brain_and_tags(tmp_path):
+    store = EvalStore(tmp_path / "eval.db")
+    for number, (case_id, brain, tags) in enumerate([
+            ("other", "brain-x", []), ("demo", "other", []),
+            ("other", "other", ["smoke"]), ("other", "other", ["unrelated"])]):
+        case = EvalCase(id=case_id, name=case_id, tags=tags, turns=["do it"])
+        exp = hx.new_experiment(case, reps=1)
+        exp["brain_preset"] = brain
+        exp["status"] = "done"
+        exp["updated"] += number
+        exp["lesson"] = {"outcome": "regression", "brain_preset": brain,
+                         "tags": tags, "lesson": f"lesson-{number}"}
+        store.create_harness_experiment(exp)
+    lessons = hx.relevant_lessons(store, _case(), "brain-x")
+    assert [lesson["lesson"] for lesson in lessons] == [
+        "lesson-1", "lesson-0", "lesson-2"]
+    store.close()
+
+
+def test_regression_cannot_create_proposal(tmp_path):
+    store = EvalStore(tmp_path / "eval.db")
+    exp = hx.create_experiment(store, _case(), reps=1)
+    exp["baseline"]["runs"] = [_measured_row("baseline", passed=True, score=9)]
+    exp["baseline"]["summary"] = hx.summarize(exp["baseline"]["runs"])
+    for name in ("invariant", "domain"):
+        exp["candidates"][name] = {
+            "rationale": name, "overlay": {},
+            "runs": [_measured_row(name, passed=True, score=9)]}
+        exp["candidates"][name]["summary"] = hx.summarize(
+            exp["candidates"][name]["runs"])
+    exp["composed"].update(
+        rationale="looked plausible", overlay={"prompt_addition": "worse"},
+        runs=[_measured_row("composed", passed=False, score=2)])
+    exp["composed"]["summary"] = hx.summarize(exp["composed"]["runs"])
+    exp["status"] = "done"
+    exp["lesson"] = hx._lesson(exp)
+    store.update_harness_experiment(exp)
+    with pytest.raises(ValueError, match="no measured improvement"):
+        hx.create_proposals(store, exp["id"])
+    assert store.proposals() == []
+    store.close()
+
+
+def test_two_sequential_cycles_carry_overlay_and_overall_evidence(
+        tmp_path, monkeypatch):
+    rt = _Runtime()
+    store = EvalStore(tmp_path / "eval.db")
+    exp = hx.create_experiment(store, _case(), reps=1, steps=2)
+    calls, propose_users = [], []
+
+    async def fake_case(view, case, store, *, disabled_tools=None, record=True,
+                        variant=None):
+        label = variant["label"].split(exp["id"] + "-", 1)[1]
+        overlay = copy.deepcopy(variant["experiment_overlay"])
+        calls.append((label, overlay))
+        passed = not label.endswith("baseline")
+        return _measured_row(label, passed=passed, score=9 if passed else 3)
+
+    async def editor(cfg, alias, messages, **kwargs):
+        system = messages[0]["content"]
+        if "Propose TWO" in system:
+            propose_users.append(messages[1]["content"])
+            addition = "verify" if len(propose_users) == 1 else "re-check"
+            return _editor_result(json.dumps({
+                "invariant": {"rationale": "improve verification",
+                              "overlay": {"prompt_addition": addition}},
+                "domain": {"rationale": "search precisely", "overlay": {
+                    "tool_description": {"name": "web.search",
+                                         "content": "search exactly"}}}}))
+        addition = "verify" if len(propose_users) == 1 else "re-check"
+        return _editor_result(json.dumps({
+            "rationale": "the matched probes support this edit",
+            "overlay": {"prompt_addition": addition,
+                        "tool_description": {"name": "web.search",
+                                             "content": "search exactly"}}}))
+
+    monkeypatch.setattr(eval_runner, "run_case", fake_case)
+    monkeypatch.setattr(eval_runner, "_model_text", editor)
+    result = run(hx.run_experiment(rt, _case(), store, exp["id"]))
+    assert result["status"] == "done"
+    assert [label for label, _overlay in calls] == [
+        "s1-baseline", "s1-invariant", "s1-domain", "s1-composed",
+        "s2-baseline", "s2-invariant", "s2-domain", "s2-composed"]
+    assert calls[4][1]["prompt_addition"] == "verify"
+    assert calls[5][1]["prompt_addition"] == "verify\n\nre-check"
+    assert '"outcome": "supported"' in propose_users[1]
+    saved = store.get_harness_experiment(exp["id"])
+    assert len(saved["history"]) == 2
+    assert saved["overall"]["baseline"]["pass_rate"] == 0
+    assert saved["overall"]["composed"]["pass_rate"] == 1
+    assert saved["lesson"]["outcome"] == "supported"
+    assert saved["composed"]["overlay"]["prompt_addition"] == "verify\n\nre-check"
+
+    proposals = hx.create_proposals(store, exp["id"])
+    payload = json.loads(proposals[0]["proposed_content"])
+    assert payload["schema"] == 2
+    assert payload["overlay"]["prompt_addition"] == "verify\n\nre-check"
+    assert payload["overlay"]["tool_descriptions"] == {
+        "web.search": "search exactly"}
+    canonical = hx.validate_canonical_overlay(payload["overlay"], rt,
+                                               allow_empty=False)
+    assert canonical["tool_descriptions"]["web.search"] == "search exactly"
     store.close()

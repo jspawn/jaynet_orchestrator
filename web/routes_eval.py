@@ -265,6 +265,9 @@ def _register_experiment_routes(app, runtime, users, store_factory, hooks) -> No
         if not 1 <= req.reps <= 3:
             raise HTTPException(status_code=400,
                                 detail="reps must be between 1 and 3")
+        if not 1 <= req.steps <= 2:
+            raise HTTPException(status_code=400,
+                                detail="steps must be between 1 and 2")
         resolve_cases, acquire_lock, release_lock = hooks()
         case = resolve_cases(req.id.strip(), "")[0]
         if case.driver != "scripted":
@@ -275,7 +278,8 @@ def _register_experiment_routes(app, runtime, users, store_factory, hooks) -> No
         try:
             store = store_factory()
             try:
-                exp = harness_experiments.create_experiment(store, case, req.reps)
+                exp = harness_experiments.create_experiment(
+                    store, case, req.reps, req.steps)
             finally:
                 store.close()
         except Exception:

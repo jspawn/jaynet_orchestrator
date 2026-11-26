@@ -131,6 +131,41 @@ def validate_overlay(raw: Any, runtime, *, allow_empty: bool = True) -> dict:
     return out
 
 
+def validate_canonical_overlay(raw: Any, runtime, *, allow_empty: bool = True) -> dict:
+    """Revalidate a carried multi-edit overlay before it can be accepted."""
+    overlay = brain_overlays.clean_overlay(raw)
+    skills = set((getattr(runtime, "skills", None) or {}).keys())
+    tools = {t.name for t in runtime.registry.all()}
+    for name in overlay["skill_additions"]:
+        if name not in skills:
+            raise ValueError(f"skill_additions target unknown name '{name}'")
+    for name in overlay["tool_descriptions"]:
+        if name not in tools:
+            raise ValueError(f"tool_descriptions target unknown name '{name}'")
+    for key, value in overlay["config"].items():
+        if key not in EXPERIMENT_CONFIG_WHITELIST:
+            raise ValueError(f"config key '{key}' is not whitelisted for experiments")
+        _experiment_config_value(key, value)
+    if not allow_empty and not _overlay_targets(overlay):
+        raise ValueError("candidate must contain one concrete harness edit")
+    return overlay
+
+
+def _singular_overlay(overlay: dict) -> dict:
+    """Keep the original proposal schema for a single-cycle experiment."""
+    canonical = brain_overlays.clean_overlay(overlay)
+    out: dict[str, Any] = {}
+    if canonical["prompt_addition"]:
+        out["prompt_addition"] = canonical["prompt_addition"]
+    for key, singular in (("skill_additions", "skill_addition"),
+                          ("tool_descriptions", "tool_description")):
+        for name, content in canonical[key].items():
+            out[singular] = {"name": name, "content": content}
+    for key, value in canonical["config"].items():
+        out["config"] = {"key": key, "value": value}
+    return out
+
+
 def validate_candidate(raw: Any, runtime, *, allow_empty: bool = False) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("candidate must be an object")
@@ -162,7 +197,7 @@ def runtime_view(runtime, overlay: dict):
     return view
 
 
-def new_experiment(case, reps: int) -> dict:
+def new_experiment(case, reps: int, steps: int = 1) -> dict:
     now = time.time()
     return {
         "id": "hx-" + uuid.uuid4().hex[:12],
@@ -170,6 +205,10 @@ def new_experiment(case, reps: int) -> dict:
         "case": {"name": case.name, "tags": list(case.tags),
                  "driver": case.driver},
         "reps": reps,
+        "steps": steps,
+        "cycle": 1,
+        "history": [],
+        "base_overlay": brain_overlays.empty_overlay(),
         "brain_preset": "",
         "base_overlay_version": 0,
         "status": "running",
@@ -191,8 +230,8 @@ def new_experiment(case, reps: int) -> dict:
     }
 
 
-def create_experiment(store, case, reps: int) -> dict:
-    exp = new_experiment(case, reps)
+def create_experiment(store, case, reps: int, steps: int = 1) -> dict:
+    exp = new_experiment(case, reps, steps)
     store.create_harness_experiment(exp)
     return exp
 
@@ -289,9 +328,7 @@ def summarize(runs: list[dict]) -> dict:
     }
 
 
-def comparison(exp: dict) -> dict:
-    base = exp["baseline"].get("summary") or {}
-    comp = exp["composed"].get("summary") or {}
+def _comparison(base: dict, comp: dict) -> dict:
     def delta(key: str):
         a, b = base.get(key), comp.get(key)
         return round(b - a, 4) if a is not None and b is not None else None
@@ -301,14 +338,23 @@ def comparison(exp: dict) -> dict:
                                - float(base.get("elapsed_s") or 0), 2)}
 
 
+def comparison(exp: dict) -> dict:
+    return _comparison(exp["baseline"].get("summary") or {},
+                       exp["composed"].get("summary") or {})
+
+
 def list_row(exp: dict) -> dict:
     return {
         "id": exp["id"], "case_id": exp["case_id"], "case": exp.get("case"),
-        "reps": exp["reps"], "status": exp["status"], "stage": exp["stage"],
+        "reps": exp["reps"], "steps": int(exp.get("steps") or 1),
+        "cycle": int(exp.get("cycle") or 1),
+        "status": exp["status"], "stage": exp["stage"],
         "created": exp["created"], "updated": exp["updated"],
         "baseline": (exp.get("baseline") or {}).get("summary") or {},
         "composed": (exp.get("composed") or {}).get("summary") or {},
-        "comparison": comparison(exp), "total": exp.get("total"),
+        "comparison": comparison(exp), "overall": exp.get("overall"),
+        "lesson_outcome": (exp.get("lesson") or {}).get("outcome"),
+        "total": exp.get("total"),
         "proposal_ids": exp.get("proposal_ids") or [], "error": exp.get("error"),
     }
 
@@ -338,7 +384,8 @@ def _digest_runs(runs: list[dict]) -> str:
         _digest_row(row) for row in runs)[:18000] or "(no executions)"
 
 
-def _artifact_snapshot(runtime, baseline_runs: list[dict]) -> str:
+def _artifact_snapshot(runtime, baseline_runs: list[dict],
+                       base_overlay: dict | None = None) -> str:
     called = {tool for row in baseline_runs for turn in row.get("transcript") or []
               for tool in turn.get("tools") or []}
     from runtime.preset_store import brain_overlay_for
@@ -346,21 +393,24 @@ def _artifact_snapshot(runtime, baseline_runs: list[dict]) -> str:
              or (runtime.config.get("orchestrator") or {}).get("model"))
     overlay = brain_overlay_for(runtime.config, model)
     active = overlay["overlay"]
-    effective = brain_overlays.config_with_overlay(runtime.config, active)
+    carried = brain_overlays.clean_overlay(base_overlay)
+    effective_overlay = brain_overlays.stack_experiment(active, carried)
+    effective = brain_overlays.config_with_overlay(runtime.config, effective_overlay)
     descriptions = {}
     for tool in runtime.registry.all():
         if tool.name in called:
             descriptions[tool.name] = tool.description
-    descriptions.update(active["tool_descriptions"])
+    descriptions.update(effective_overlay["tool_descriptions"])
     skills = [{"name": name, "description": str(s.get("description") or "")[:300]}
               for name, s in sorted((getattr(runtime, "skills", None) or {}).items())]
     config = {key: _get_dot(effective, key)
               for key in sorted(EXPERIMENT_CONFIG_WHITELIST)}
     return json.dumps({
         "system_prompt": (str(getattr(runtime, "system_prompt", "") or "")
-                          + ("\n\n" + active["prompt_addition"]
-                             if active["prompt_addition"] else ""))[:14000],
+                          + ("\n\n" + effective_overlay["prompt_addition"]
+                             if effective_overlay["prompt_addition"] else ""))[:14000],
         "brain_overlay": overlay,
+        "experiment_base": carried,
         "skills": skills,
         "relevant_tool_descriptions": descriptions,
         "all_tool_names": sorted(t.name for t in runtime.registry.all()),
@@ -477,7 +527,9 @@ async def propose(runtime, case, baseline_runs: list[dict],
 Propose TWO minimal candidates: INVARIANT targets reusable agent discipline
 (planning, delegation, verification, context use); DOMAIN targets this task's
 domain procedure or tool guidance. Each candidate needs a rationale tied to a
-specific baseline observation. Do not invent task facts or stack unrelated edits.
+specific baseline observation. Reuse supported lessons only when applicable;
+do not repeat regression/no_effect edits without new baseline evidence.
+Do not invent task facts or stack unrelated edits.
 Return ONLY JSON: {"invariant": {"rationale": "...", "overlay": {}},
 "domain": {"rationale": "...", "overlay": {}}}.
 """ + _OVERLAY_SPEC
@@ -486,7 +538,7 @@ Return ONLY JSON: {"invariant": {"rationale": "...", "overlay": {}},
     user = (f"## Eval case\n{_case_brief(case)}\n\n"
             f"## Baseline executions\n{_digest_runs(baseline_runs)}\n\n"
             f"## Current artifacts\n{snapshot}\n\n"
-            f"## Prior evidence-backed lessons\n"
+            f"## Relevant measured lessons (including failed edits)\n"
             f"{json.dumps(lessons, ensure_ascii=False)[:6000]}\n\n"
             f"## Whitelisted config keys\n{sorted(EXPERIMENT_CONFIG_WHITELIST)}")
 
@@ -504,7 +556,7 @@ Return ONLY JSON: {"invariant": {"rationale": "...", "overlay": {}},
 def _probed_targets(candidates: dict) -> dict[str, set[str]]:
     targets: dict[str, set[str]] = {key: set() for key in _OVERLAY_KEYS}
     for candidate in candidates.values():
-        overlay = candidate.get("overlay") or {}
+        overlay = candidate.get("edit") or candidate.get("overlay") or {}
         for key in _OVERLAY_KEYS:
             edit = overlay.get(key)
             if not edit:
@@ -533,17 +585,21 @@ def _assert_previously_probed(overlay: dict, candidates: dict) -> None:
 async def compose(runtime, case, exp: dict, *,
                   cost_budget: dict | None = None, on_result=None) -> tuple[dict, dict]:
     system = """Compose a successor harness from matched behavioral contrasts.
-Keep, merge or revise ONLY edit targets that were actually probed. You may keep
-the baseline by returning an empty overlay. Tie every decision to an observed
-trajectory or deliverable change; a score alone is not proof. Do not introduce
-new targets or presume that more instructions are better.
-Return ONLY JSON: {"rationale": "...", "overlay": {}}.
+Keep, merge or revise ONLY edit targets that were actually probed in this cycle.
+Your overlay contains NEW changes on top of Current base overlay; inherited edits
+stay in place. Return an empty overlay to keep the current harness unchanged.
+Tie every decision to an observed trajectory or deliverable change; a score alone
+is not proof. Do not introduce new targets or presume that more instructions are
+better. Return ONLY JSON: {"rationale": "...", "overlay": {}}.
 """ + _OVERLAY_SPEC
     evidence = {
+        "current_base_overlay": exp.get("base_overlay") or {},
         "baseline": exp["baseline"],
         "candidates": exp["candidates"],
     }
     user = (f"## Eval case\n{_case_brief(case)}\n\n"
+            f"## Current base overlay\n"
+            f"{json.dumps(exp.get('base_overlay') or {}, ensure_ascii=False)}\n\n"
             f"## Matched arm evidence\n{json.dumps(evidence, ensure_ascii=False)[:30000]}")
 
     def _candidate(parsed):
@@ -602,16 +658,163 @@ async def _run_arm(runtime, case, store, exp: dict, arm: dict,
     _require_measured(arm, label, int(exp["reps"]))
 
 
-def _lesson(exp: dict) -> dict:
+def _overlay_targets(overlay: dict) -> list[str]:
+    """Stable retrieval facets for singular edits and canonical overlays."""
+    targets = []
+    if overlay.get("prompt_addition"):
+        targets.append("prompt")
+    skills = overlay.get("skill_additions") or {}
+    if overlay.get("skill_addition"):
+        skills = {overlay["skill_addition"].get("name"): True}
+    targets.extend(f"skill:{name}" for name in sorted(skills) if name)
+    tools = overlay.get("tool_descriptions") or {}
+    if overlay.get("tool_description"):
+        tools = {overlay["tool_description"].get("name"): True}
+    targets.extend(f"tool:{name}" for name in sorted(tools) if name)
+    config = overlay.get("config") or {}
+    if "key" in config:
+        config = {config["key"]: True}
+    targets.extend(f"config:{name}" for name in sorted(config))
+    return targets
+
+
+def _lesson(exp: dict, *, baseline: dict | None = None,
+            use_effective: bool = False) -> dict:
+    baseline = baseline or exp["baseline"]
     composed = exp["composed"]
+    if use_effective:
+        edit = composed.get("overlay") or {}
+    elif "edit" in composed:
+        edit = composed.get("edit") or {}
+    else:
+        edit = composed.get("overlay") or {}
+    targets = _overlay_targets(edit)
+    evidence = _comparison(baseline.get("summary") or {},
+                           composed.get("summary") or {})
+    pass_delta, score_delta = evidence["pass_rate"], evidence["avg_score"]
+    if not targets:
+        outcome = "no_effect"
+    elif (pass_delta or 0) > 0 or (
+            pass_delta == 0 and (score_delta or 0) > 0):
+        outcome = "supported"
+    elif (pass_delta or 0) < 0 or (
+            pass_delta == 0 and (score_delta or 0) < 0):
+        outcome = "regression"
+    else:
+        outcome = "no_effect"
+    rationale = composed.get("rationale") or "No harness change was supported."
+    if outcome == "regression":
+        rationale = "Rejected composed edit: " + rationale
+    elif outcome == "no_effect":
+        rationale = "No measured improvement: " + rationale
     return {
+        "outcome": outcome,
+        "brain_preset": exp.get("brain_preset") or "",
+        "case_id": exp["case_id"],
+        "tags": list(exp.get("case", {}).get("tags") or []),
+        "targets": targets,
         "applicable_when": (f"case {exp['case_id']}; tags: "
                             + ", ".join(exp.get("case", {}).get("tags") or [])),
-        "lesson": composed.get("rationale") or "No harness change was supported.",
-        "evidence": {"reps": exp["reps"], "comparison": comparison(exp),
-                     "baseline": exp["baseline"].get("summary"),
+        "lesson": rationale,
+        "evidence": {"reps": exp["reps"], "comparison": evidence,
+                     "baseline": baseline.get("summary"),
                      "composed": composed.get("summary")},
     }
+
+
+def relevant_lessons(store, case, brain: str, *, exclude_id: str | None = None,
+                     limit: int = 3) -> list[dict]:
+    """Retrieve measured lessons by case, tags and brain, including failures."""
+    tags = set(case.tags or [])
+    ranked = []
+    for exp in store.harness_experiments(limit=200):
+        lesson = exp.get("lesson")
+        if (exp["id"] == exclude_id or exp.get("status") != "done"
+                or not isinstance(lesson, dict)):
+            continue
+        lesson_tags = set(lesson.get("tags")
+                          or (exp.get("case") or {}).get("tags") or [])
+        score = 0
+        if exp.get("case_id") == case.id:
+            score += 8
+        score += 2 * len(tags & lesson_tags)
+        if brain and (lesson.get("brain_preset")
+                      or exp.get("brain_preset")) == brain:
+            score += 3
+        if score:
+            item = dict(lesson)
+            item.setdefault("experiment_id", exp["id"])
+            ranked.append((score, float(exp.get("updated") or 0), item))
+    ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    return [item for _score, _updated, item in ranked[:limit]]
+
+
+def _cycle_snapshot(exp: dict) -> dict:
+    keys = ("baseline", "candidates", "composed", "propose_meta",
+            "compose_meta", "lesson")
+    return {"cycle": exp["cycle"],
+            **{key: copy.deepcopy(exp[key]) for key in keys}}
+
+
+async def _run_cycle(runtime, case, store, exp: dict, lessons: list[dict],
+                     disabled_tools, progress, should_stop) -> dict:
+    """Run one PPC cycle on top of exp's carried, run-scoped base overlay."""
+    cycle, steps = exp["cycle"], int(exp.get("steps") or 1)
+    base = brain_overlays.clean_overlay(exp.get("base_overlay"))
+    prefix = "" if steps == 1 else f"s{cycle}-"
+    exp["baseline"] = {"overlay": base, "runs": [], "summary": {}}
+    exp["candidates"] = {}
+    exp["composed"] = {"rationale": "", "edit": {}, "overlay": base,
+                       "runs": [], "summary": {}}
+    exp["propose_meta"], exp["compose_meta"] = {}, {}
+    _save(store, exp, stage=f"cycle {cycle}/{steps}: baseline")
+    await _run_arm(runtime, case, store, exp, exp["baseline"],
+                   prefix + "baseline", base, disabled_tools, progress, should_stop)
+    _check_stop(exp, should_stop)
+    _check_artifacts(runtime, exp)
+    exp["baseline_artifacts"] = _artifact_snapshot(
+        runtime, exp["baseline"]["runs"], base_overlay=base)
+    remaining = _check_budget(runtime, exp)
+    _save(store, exp, stage=f"cycle {cycle}/{steps}: propose")
+    candidates, _ = await propose(
+        runtime, case, exp["baseline"]["runs"], lessons,
+        artifact_snapshot=exp["baseline_artifacts"],
+        cost_budget={"cap": remaining, "remaining": remaining},
+        on_result=lambda result: _meta_usage(exp, "propose_meta", result))
+    _check_artifacts(runtime, exp)
+    exp["candidates"] = {
+        name: {**candidate, "edit": candidate["overlay"],
+               "overlay": brain_overlays.merge_overlay(
+                   base, brain_overlays.from_experiment(candidate["overlay"])),
+               "runs": [], "summary": {}}
+        for name, candidate in candidates.items()
+    }
+    _save(store, exp)
+    for name in ("invariant", "domain"):
+        candidate = exp["candidates"][name]
+        await _run_arm(runtime, case, store, exp, candidate, prefix + name,
+                       candidate["overlay"], disabled_tools, progress, should_stop)
+    _check_stop(exp, should_stop)
+    _check_artifacts(runtime, exp)
+    remaining = _check_budget(runtime, exp)
+    _save(store, exp, stage=f"cycle {cycle}/{steps}: compose")
+    composed, _ = await compose(
+        runtime, case, exp,
+        cost_budget={"cap": remaining, "remaining": remaining},
+        on_result=lambda result: _meta_usage(exp, "compose_meta", result))
+    _check_artifacts(runtime, exp)
+    effective = brain_overlays.merge_overlay(
+        base, brain_overlays.from_experiment(composed["overlay"]))
+    exp["composed"].update(rationale=composed["rationale"],
+                           edit=composed["overlay"], overlay=effective)
+    _save(store, exp)
+    await _run_arm(runtime, case, store, exp, exp["composed"],
+                   prefix + "composed", effective,
+                   disabled_tools, progress, should_stop)
+    exp["lesson"] = _lesson(exp)
+    exp["history"].append(_cycle_snapshot(exp))
+    _save(store, exp)
+    return effective
 
 
 async def run_experiment(runtime, case, store, experiment_id: str,
@@ -628,46 +831,26 @@ async def run_experiment(runtime, case, store, experiment_id: str,
         exp["brain_preset"] = overlay["preset"] or eval_runner.brain_label(runtime)
         exp["base_overlay_version"] = overlay["version"]
         exp["baseline_fingerprint"] = _artifact_fingerprint(runtime)
+        exp.setdefault("history", [])
+        exp["base_overlay"] = brain_overlays.empty_overlay()
         _save(store, exp)
-        await _run_arm(runtime, case, store, exp, exp["baseline"], "baseline",
-                       {}, disabled_tools, progress, should_stop)
-        _check_stop(exp, should_stop)
-        _check_artifacts(runtime, exp)
-        exp["baseline_artifacts"] = _artifact_snapshot(
-            runtime, exp["baseline"]["runs"])
-        remaining = _check_budget(runtime, exp)
-        _save(store, exp, stage="propose")
-        lessons = [e["lesson"] for e in store.harness_experiments(limit=20)
-                   if e["id"] != experiment_id and e.get("lesson")]
-        candidates, _ = await propose(
-            runtime, case, exp["baseline"]["runs"], lessons[:3],
-            artifact_snapshot=exp["baseline_artifacts"],
-            cost_budget={"cap": remaining, "remaining": remaining},
-            on_result=lambda result: _meta_usage(exp, "propose_meta", result))
-        _check_artifacts(runtime, exp)
-        exp["candidates"] = {
-            name: {**candidate, "runs": [], "summary": {}}
-            for name, candidate in candidates.items()
+        for cycle in range(1, int(exp.get("steps") or 1) + 1):
+            exp["cycle"] = cycle
+            local = [item["lesson"] for item in reversed(exp["history"])
+                     if item.get("lesson")]
+            lessons = (local + relevant_lessons(
+                store, case, exp["brain_preset"], exclude_id=experiment_id))[:3]
+            exp["base_overlay"] = await _run_cycle(
+                runtime, case, store, exp, lessons,
+                disabled_tools, progress, should_stop)
+        initial = exp["history"][0]["baseline"]
+        exp["overall"] = {
+            "baseline": initial.get("summary") or {},
+            "composed": exp["composed"].get("summary") or {},
+            "comparison": _comparison(initial.get("summary") or {},
+                                      exp["composed"].get("summary") or {}),
         }
-        _save(store, exp)
-        for name in ("invariant", "domain"):
-            await _run_arm(runtime, case, store, exp, exp["candidates"][name],
-                           name, exp["candidates"][name]["overlay"],
-                           disabled_tools, progress, should_stop)
-        _check_stop(exp, should_stop)
-        _check_artifacts(runtime, exp)
-        remaining = _check_budget(runtime, exp)
-        _save(store, exp, stage="compose")
-        composed, _ = await compose(
-            runtime, case, exp,
-            cost_budget={"cap": remaining, "remaining": remaining},
-            on_result=lambda result: _meta_usage(exp, "compose_meta", result))
-        _check_artifacts(runtime, exp)
-        exp["composed"].update(composed)
-        _save(store, exp)
-        await _run_arm(runtime, case, store, exp, exp["composed"], "composed",
-                       composed["overlay"], disabled_tools, progress, should_stop)
-        exp["lesson"] = _lesson(exp)
+        exp["lesson"] = _lesson(exp, baseline=initial, use_effective=True)
         _save(store, exp, status="done", stage="complete")
     except ExperimentCancelled as exc:
         exp["error"] = str(exc)
@@ -681,11 +864,14 @@ async def run_experiment(runtime, case, store, experiment_id: str,
 
 def _verify_experiment_evidence(exp: dict) -> None:
     reps = int(exp.get("reps") or 0)
-    _require_measured(exp.get("baseline") or {}, "baseline", reps)
-    candidates = exp.get("candidates") or {}
-    for name in ("invariant", "domain"):
-        _require_measured(candidates.get(name) or {}, name, reps)
-    _require_measured(exp.get("composed") or {}, "composed", reps)
+    cycles = exp.get("history") or [exp]
+    for cycle in cycles:
+        label = f"cycle {cycle.get('cycle', 1)} "
+        _require_measured(cycle.get("baseline") or {}, label + "baseline", reps)
+        candidates = cycle.get("candidates") or {}
+        for name in ("invariant", "domain"):
+            _require_measured(candidates.get(name) or {}, label + name, reps)
+        _require_measured(cycle.get("composed") or {}, label + "composed", reps)
 
 
 def create_proposals(store, experiment_id: str) -> list[dict]:
@@ -697,6 +883,10 @@ def create_proposals(store, experiment_id: str) -> list[dict]:
     if exp.get("proposal_ids"):
         raise ValueError("proposals were already created for this experiment")
     _verify_experiment_evidence(exp)
+    lesson = exp.get("lesson") or {}
+    if lesson and lesson.get("outcome") != "supported":
+        raise ValueError("the composed overlay has no measured improvement; "
+                         "refine it in another experiment before proposing")
     overlay = (exp.get("composed") or {}).get("overlay") or {}
     if not overlay:
         raise ValueError("the composer kept the baseline; there is nothing to propose")
@@ -706,7 +896,12 @@ def create_proposals(store, experiment_id: str) -> list[dict]:
     base_version = int(exp.get("base_overlay_version") or 0)
     cause = str(exp["composed"].get("rationale") or "matched experiment evidence")
     what = f"Harness experiment {experiment_id} for {exp['case_id']}"
-    content = {"schema": 1, "base_version": base_version,
+    sequential = int(exp.get("steps") or 1) > 1
+    if sequential:
+        overlay = brain_overlays.clean_overlay(overlay)
+    else:
+        overlay = _singular_overlay(overlay)
+    content = {"schema": 2 if sequential else 1, "base_version": base_version,
                "experiment_id": experiment_id, "overlay": overlay}
     proposal = store.add_proposal(
         test_id=exp["case_id"], result_id=None, classification="brain-overlay",

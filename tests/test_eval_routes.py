@@ -1578,6 +1578,8 @@ async def test_harness_experiment_routes_and_pending_proposals(
         assert (await c.post("/api/admin/evals/experiments",
                              json={"id": "smoke-case", "reps": 4})).status_code == 400
         assert (await c.post("/api/admin/evals/experiments",
+                             json={"id": "smoke-case", "steps": 3})).status_code == 400
+        assert (await c.post("/api/admin/evals/experiments",
                              json={"id": "missing"})).status_code == 404
         r = await c.post("/api/admin/evals/experiments",
                          json={"id": "smoke-case", "reps": 1})
@@ -1700,3 +1702,30 @@ async def test_atomic_experiment_overlay_accept(evalapp, web_client):
     assert active["overlay"]["config"] == {"architect.threshold": 2}
     assert (app.state.runtime.config.get("architect") or {}).get("threshold") == \
         global_threshold
+
+
+@pytest.mark.asyncio
+async def test_sequential_experiment_overlay_accept(evalapp, web_client):
+    import json
+
+    from runtime import brain_overlays
+    app, *_ = evalapp
+    db = _brain_catalog(app, "brain-seq")
+    content = {"schema": 2, "base_version": 0, "experiment_id": "hx-seq",
+               "overlay": {"prompt_addition": "verify first",
+                           "skill_additions": {}, "tool_descriptions": {},
+                           "config": {"architect.threshold": 2}}}
+    store = _store()
+    prop = store.add_proposal(
+        test_id="case", result_id=None, classification="brain-overlay",
+        target="brain-seq", proposed_content=json.dumps(content),
+        what="w", cause="c", fix="combined", brain_preset="brain-seq",
+        base_overlay_version=0)
+    store.close()
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert r.status_code == 200 and r.json()["path"] == "brain-seq@v1"
+    active = brain_overlays.BrainOverlayStore(db).active("brain-seq")
+    assert active["experiment_id"] == "hx-seq"
+    assert active["overlay"]["prompt_addition"] == "verify first"
+    assert active["overlay"]["config"] == {"architect.threshold": 2}

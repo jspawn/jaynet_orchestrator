@@ -600,9 +600,11 @@ def config(cfg: dict, experiment: dict | None = None) -> dict:
     for key, value in active.items():
         if key.startswith("eval."):
             raw[key.split(".", 1)[1]] = value
-    candidate = (experiment or {}).get("config") or {}
-    if str(candidate.get("key") or "").startswith("eval."):
-        raw[str(candidate["key"]).split(".", 1)[1]] = candidate["value"]
+    from runtime import brain_overlays
+    candidate = brain_overlays.from_experiment(experiment)["config"]
+    for key, value in candidate.items():
+        if key.startswith("eval."):
+            raw[key.split(".", 1)[1]] = value
     for k in out:
         if raw.get(k) is not None:
             out[k] = raw[k]
@@ -2456,10 +2458,9 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     tool_descriptions = {
         t.name: (getattr(t, "description", "") or "")
         for t in runtime.registry.all() if t.name in relevant}
+    experiment_overlay = brain_overlays.from_experiment(experiment)
     tool_descriptions.update(active["tool_descriptions"])
-    if experiment.get("tool_description"):
-        t = experiment["tool_description"]
-        tool_descriptions[t["name"]] = t["content"]
+    tool_descriptions.update(experiment_overlay["tool_descriptions"])
     extra_skills = _skill_loads_from_trace(run_ids)
     skill_bodies = _loaded_skill_bodies(
         transcript, skills_dir=(runtime.config.get("skills") or {}).get("dir"),
@@ -2467,10 +2468,9 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     for name, content in active["skill_additions"].items():
         if name in skill_bodies:
             skill_bodies[name] += "\n\n— Brain overlay addition —\n" + content
-    if experiment.get("skill_addition"):
-        s = experiment["skill_addition"]
-        if s["name"] in skill_bodies:
-            skill_bodies[s["name"]] += "\n\n— Experiment addition —\n" + s["content"]
+    for name, content in experiment_overlay["skill_additions"].items():
+        if name in skill_bodies:
+            skill_bodies[name] += "\n\n— Experiment addition —\n" + content
     effective_cfg = brain_overlays.config_with_overlay(runtime.config, active)
     effective_cfg = brain_overlays.config_with_overlay(
         effective_cfg, brain_overlays.from_experiment(experiment))

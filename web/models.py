@@ -232,6 +232,7 @@ class EvalRunRequest(BaseModel):
 class EvalExperimentRequest(BaseModel):
     id: str                                # one scripted eval case
     reps: int = 1                          # matched repetitions per arm (1-3)
+    steps: int = 1                         # sequential PPC cycles (1-2)
 
 
 class EvalBenchmarkVariant(BaseModel):

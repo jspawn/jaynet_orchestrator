@@ -964,9 +964,11 @@
   <section>
     <h2>Harness experiments <button id="evExpRefresh" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Four matched arms — baseline, invariant, domain and composed — test proposed harness
-      changes under the same conditions. Overlays are isolated to each arm and nothing
-      auto-applies. <b>1 rep is exploratory; use 3 reps before treating an outcome as confirmed.</b>
+      Each cycle runs four matched arms — baseline, invariant, domain and composed.
+      Two sequential cycles carry the composed overlay into a second refinement.
+      Overlays stay isolated and nothing auto-applies. Lessons retain supported,
+      neutral and negative evidence, retrieved by case, tags and brain.
+      <b>1 rep is exploratory; use 3 reps before treating an outcome as confirmed.</b>
       Launch from the experiment action on an eval case.</p>
     <div class="row">
       <label class="muted" for="evExpReps" style="font-size:12px">Reps for next experiment</label>
@@ -975,13 +977,18 @@
         <option value="2">2</option>
         <option value="3">3 — recommended for confirmation</option>
       </select>
+      <label class="muted" for="evExpSteps" style="font-size:12px">Sequential cycles</label>
+      <select id="evExpSteps">
+        <option value="1">1 — one refinement</option>
+        <option value="2">2 — carry composed overlay forward</option>
+      </select>
       <span class="note" id="evExpNote"></span>
     </div>
   </section>
 
   <section>
     <h2>Experiments</h2>
-    <table><thead><tr><th>Status / stage</th><th>Case</th><th>Reps</th><th>Baseline → composed</th><th>Cost</th><th></th></tr></thead>
+    <table><thead><tr><th>Status / stage</th><th>Case</th><th>Reps × cycles</th><th>Baseline → composed</th><th>Cost</th><th></th></tr></thead>
       <tbody id="evExpRows"><tr><td colspan="6" class="muted">loading…</td></tr></tbody></table>
   </section>
 
@@ -1153,7 +1160,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=22"></script>
+<script src="/static/admin.js?v=23"></script>
 
 </body>
 </html>

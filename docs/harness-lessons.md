@@ -145,6 +145,16 @@ prompt-per-model versioning: shared gate doctrine stays global, while small,
 reviewed behavioral lessons become transferable, reversible preset adapters.
 Tests: `tests/test_brain_overlays.py` and the brain-scoped route cases.
 
+**4d — evidence-gated lessons + sequential recursion: IMPLEMENTED.** Harness
+experiments classify every completed cycle as `supported`, `no_effect`, or
+`regression`; only a measured overall improvement can create a proposal.
+Propose retrieves relevant lessons by case, tags and brain, including failed
+edits, rather than reading the latest three globally. An optional second cycle
+carries the composed run-scoped overlay and prior evidence into another PPC
+refinement; the UI retains every cycle and the overall baseline comparison.
+Multi-edit sequential proposals use schema 2 and are revalidated on accept.
+Tests: `tests/test_harness_experiments.py` and the schema-2 route case.
+
 ## Sequence
 
 | # | Item | Effort | Depends on |
@@ -154,4 +164,5 @@ Tests: `tests/test_brain_overlays.py` and the brain-scoped route cases.
 | 3 | Acceptance ledger | done | — |
 | 4b | Model profiles | done | 4a |
 | 4c | Versioned brain overlays | done | 4b |
+| 4d | Evidence-gated lessons + sequential recursion | done | 4c |
 | 2 | Protocol v1 (typed events → /v1 → threads) | stages 1–2 done; stage 3 (threads) not before Android grows | before Android grows |

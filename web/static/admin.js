@@ -3594,13 +3594,29 @@ function evExpStatus(status){
   return "<span class='pill st "+cls+"'>"+esc(status||"unknown")+"</span>";
 }
 function evExpComparison(exp){
-  const b=(exp.baseline||{}).summary||{}, c=(exp.composed||{}).summary||{};
+  const overall=exp.overall||null;
+  const b=overall?(overall.baseline||{}):(exp.baseline||{}).summary||{};
+  const c=overall?(overall.composed||{}):(exp.composed||{}).summary||{};
   const delta=k=>(b[k]==null||c[k]==null)?null:Number(c[k])-Number(b[k]);
   const fmt=(v,fn)=>v==null?"—":(v>0?"+":"")+fn(v);
   return "pass rate "+fmt(delta("pass_rate"),v=>(v*100).toFixed(1)+" pp")+
     " · avg score "+fmt(delta("avg_score"),v=>v.toFixed(2))+
     " · tokens "+fmt(delta("tokens"),v=>Math.round(v).toLocaleString())+
     " · elapsed "+fmt(delta("elapsed_s"),v=>v.toFixed(1)+"s");
+}
+function evExpHasOverlay(o){
+  o=o||{};
+  return !!(o.prompt_addition||o.skill_addition||o.tool_description||
+    (o.config&&o.config.key)||Object.keys(o.skill_additions||{}).length||
+    Object.keys(o.tool_descriptions||{}).length||
+    (o.config&&!o.config.key&&Object.keys(o.config).length));
+}
+function evExpArms(exp){
+  const candidates=exp.candidates||{};
+  return renderEvalExperimentArm("Baseline",exp.baseline||null)+
+    renderEvalExperimentArm("Invariant candidate",candidates.invariant||null)+
+    renderEvalExperimentArm("Domain candidate",candidates.domain||null)+
+    renderEvalExperimentArm("Composed",exp.composed||null);
 }
 function renderEvalExperimentArm(label,arm){
   let h="<details open style='border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:10px'>"+
@@ -3645,15 +3661,20 @@ function renderEvalExperimentDetail(exp){
   let h="<div class='row'>"+evExpStatus(exp.status)+"<span class='pill'>"+esc(exp.stage||"—")+"</span>"+
     "<b>"+esc(exp.id)+"</b></div>"+
     "<p class='muted' style='font-size:12px;white-space:pre-wrap'><b>"+esc(exp.case_id)+"</b>"+
-    (info.name?" — "+esc(info.name):"")+"<br>"+esc(exp.reps)+" reps · created "+esc(evExpTime(exp.created))+
+    (info.name?" — "+esc(info.name):"")+"<br>"+esc(exp.reps)+" reps × "+esc(exp.steps||1)+
+    " cycle"+(Number(exp.steps||1)===1?"":"s")+" · created "+esc(evExpTime(exp.created))+
     " · updated "+esc(evExpTime(exp.updated))+"<br>Total "+evExpMoney(total.cost_usd)+" · "+
     esc(Number(total.tokens||0).toLocaleString())+" tokens</p>"+
-    "<p style='font-size:12px'><b>Composed vs baseline:</b> "+esc(evExpComparison(exp))+"</p>";
+    "<p style='font-size:12px'><b>"+(exp.overall?"Overall vs initial baseline":"Composed vs baseline")+
+    ":</b> "+esc(evExpComparison(exp))+"</p>";
+  if(exp.lesson) h+="<p style='font-size:12px;white-space:pre-wrap'><b>Lesson · "+
+    esc(exp.lesson.outcome||"unclassified")+"</b><br>"+esc(exp.lesson.lesson||"")+"</p>";
   if(exp.error||exp.status==="cancelled"){
     const msg=(exp.status==="cancelled"?"Experiment cancelled. ":"")+(exp.error||"");
     h+="<div class='errlist'>"+esc(msg)+"</div>";
   }
-  const canCreate=exp.status==="done"&&Object.keys(overlay).length>0&&!ids.length;
+  const canCreate=exp.status==="done"&&evExpHasOverlay(overlay)&&!ids.length&&
+    (!exp.lesson||exp.lesson.outcome==="supported");
   if(canCreate) h+="<div class='row' style='margin:10px 0'><button class='primary' data-ev-exp-create>"+
     "Create gated proposal</button><span class='muted' style='font-size:12px'>"+
     "Creates one pending brain overlay; never accepts or applies it.</span></div>";
@@ -3661,13 +3682,16 @@ function renderEvalExperimentDetail(exp){
     ids.map(id=>"<code>"+esc(id)+"</code>").join(", ")+
     " <button data-ev-exp-proposals>Review in Proposals</button><br>"+
     "<span class='muted'>Nothing is accepted or applied automatically.</span></p>";
-  else if(exp.status==="done"&&!Object.keys(overlay).length)
+  else if(exp.status==="done"&&!evExpHasOverlay(overlay))
     h+="<p class='muted' style='font-size:12px'>The composer kept the baseline; there is nothing to propose.</p>";
-  const candidates=exp.candidates||{};
-  h+=renderEvalExperimentArm("Baseline",exp.baseline||null)+
-    renderEvalExperimentArm("Invariant candidate",candidates.invariant||null)+
-    renderEvalExperimentArm("Domain candidate",candidates.domain||null)+
-    renderEvalExperimentArm("Composed",exp.composed||null);
+  else if(exp.status==="done"&&exp.lesson&&exp.lesson.outcome!=="supported")
+    h+="<p class='muted' style='font-size:12px'>No measured improvement; this evidence stays in the lesson library without a proposal.</p>";
+  const history=exp.history||[];
+  if(history.length>1) history.slice(0,-1).forEach(cycle=>{
+    h+="<details style='margin-top:12px'><summary><b>Cycle "+esc(cycle.cycle)+"</b> · "+
+      esc((cycle.lesson||{}).outcome||"complete")+"</summary>"+evExpArms(cycle)+"</details>";
+  });
+  h+=(history.length>1?"<h3>Final cycle</h3>":"")+evExpArms(exp);
   out.innerHTML=h;
   const create=out.querySelector("[data-ev-exp-create]");
   if(create) create.onclick=()=>createEvalExperimentProposals(exp.id);
@@ -3680,8 +3704,9 @@ function renderEvalExperiments(){
     return "<tr><td style='white-space:nowrap'>"+evExpStatus(e.status)+
       "<div class='muted' style='font-size:11px'>"+esc(e.stage||"—")+"</div></td>"+
       "<td><b>"+esc(e.case_id)+"</b><div class='muted' style='font-size:11px'>"+esc(info.name||"")+"</div></td>"+
-      "<td>"+esc(e.reps)+"</td><td style='font-size:12px'>"+esc(evExpSummary(e.baseline))+
-      " <span class='muted'>→</span> "+esc(evExpSummary(e.composed))+"</td>"+
+      "<td>"+esc(e.reps)+(Number(e.steps||1)>1?" × "+esc(e.steps):"")+"</td>"+
+      "<td style='font-size:12px'>"+esc(evExpSummary(e.overall?e.overall.baseline:e.baseline))+
+      " <span class='muted'>→</span> "+esc(evExpSummary(e.overall?e.overall.composed:e.composed))+"</td>"+
       "<td style='white-space:nowrap'>"+evExpMoney(total.cost_usd)+
       "<div class='muted' style='font-size:11px'>"+esc(Number(total.tokens||0).toLocaleString())+" tokens</div></td>"+
       "<td style='text-align:right'><button data-ev-exp-view='"+esc(e.id)+"'>view</button></td></tr>";
@@ -3743,14 +3768,15 @@ function stopEvalExperimentPolling(){
 }
 async function startEvalExperiment(id){
   const reps=Math.min(3,Math.max(1,parseInt($("#evExpReps").value,10)||1));
-  const runs=4*reps;
+  const steps=Math.min(2,Math.max(1,parseInt($("#evExpSteps").value,10)||1));
+  const runs=4*reps*steps;
   if(!await dlgConfirm("Run a matched experiment for '"+id+"' with "+reps+" rep"+(reps===1?"":"s")+
-      "? Four arms (baseline, invariant, domain, composed) × "+reps+" = "+runs+
+      " and "+steps+" sequential cycle"+(steps===1?"":"s")+"? Four arms × "+reps+" × "+steps+" = "+runs+
       " real eval runs, plus model calls to propose and compose overlays. This can incur real eval cost. "+
       "Overlays stay isolated and nothing auto-applies.",{yes:"run experiment"})) return;
   try{
     const r=await api("/api/admin/evals/experiments",{method:"POST",
-      headers:{"content-type":"application/json"},body:JSON.stringify({id,reps})});
+      headers:{"content-type":"application/json"},body:JSON.stringify({id,reps,steps})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ note($("#evTabNote"),studioDetail(j),false); return; }
     const exp=j.experiment||{};
