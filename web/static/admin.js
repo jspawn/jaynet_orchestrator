@@ -1567,6 +1567,7 @@ $("#schedAdd").onclick=async()=>{
   if(kind==="once") body.when=sched; else if(kind==="every") body.every=sched; else body.cron=sched;
   if($("#schedProject").value) body.project_id=$("#schedProject").value;
   if($("#schedSource").value){ body.source=$("#schedSource").value; body.query=$("#schedQuery").value.trim(); }
+  body.auto_approve_tools=$("#schedAutoApprove").value.split(",").map(s=>s.trim()).filter(Boolean);
   if(!body.owner||!body.prompt||!sched||(body.source&&!body.query)){
     note($("#schedNote"),"owner, prompt, schedule and watch query required",false); return; }
   const r=await api("/api/admin/schedules",{method:"POST",
@@ -1575,6 +1576,7 @@ $("#schedAdd").onclick=async()=>{
   if(!r.ok){ note($("#schedNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
   note($("#schedNote"),"added",true);
   $("#schedPrompt").value=""; $("#schedWhen").value=""; $("#schedQuery").value="";
+  $("#schedAutoApprove").value="";
   loadSchedules();
 };
 

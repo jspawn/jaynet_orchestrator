@@ -50,8 +50,10 @@ _SCHEMALESS_TARGET = re.compile(
 
 
 def _arg_host(a: str) -> str | None:
-    """Host of a network-target arg: a full URL, or a scheme-less host[:port] /
-    host/path / bare-IP token. None when the arg doesn't look like a target."""
+    """Host of a network-target arg, including --url=/--proxy= forms."""
+    key, sep, value = a.partition("=")
+    if sep and key in {"--url", "--proxy", "--doh-url"}:
+        a = value
     if re.match(r"https?://", a):
         return urlparse(a).hostname or ""
     m = _SCHEMALESS_TARGET.match(a)
@@ -76,8 +78,10 @@ def _validate(command: str, allow: set[str], loopback_only: bool):
     if not argv:
         return None, "empty command"
     prog = os.path.basename(argv[0])
-    if prog not in allow:
-        return None, (f"'{prog}' is not in the ops.run allowlist "
+    # Bare program names resolve through the scrubbed project PATH. Reject
+    # path spellings so /tmp/python cannot impersonate an allowlisted python.
+    if argv[0] != prog or prog not in allow:
+        return None, (f"'{argv[0]}' is not in the ops.run allowlist "
                       f"({', '.join(sorted(allow))}) — extend tools.ops.allow to permit it")
     if loopback_only and prog in _NET_PROGS:
         for a in argv[1:]:

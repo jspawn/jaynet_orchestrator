@@ -657,8 +657,10 @@ with a full management view here.
   watch history shows observation decisions instead. The full answer lands in
   the owner's "⏰ Scheduled runs" chat. Disabling or deleting cancels queued
   work but never kills a run already in flight.
-- Fired runs carry the owner's role: an admin's schedule auto-confirms gated
-  tools (config `tools.schedule.auto_confirm`), a non-admin's never does.
+- Fired runs carry the owner's role. For admin owners, only tools named in the
+  entry's **unattended tool approvals** list auto-confirm; empty/legacy entries
+  decline every gated call. Non-admin entries always decline them. The global
+  `tools.schedule.auto_confirm: false` disables the allowlists too.
   Revoking a user's schedules flag auto-disables the entries they created
   themselves at the next tick; entries you plant here (`created_by: admin`)
   keep firing — you manage them in this table. The eval-suite scheduler

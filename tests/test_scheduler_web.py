@@ -281,7 +281,32 @@ def test_scheduled_run_gets_deny_confirm_provider(tmp_path):
         assert await _wait(lambda: bool(runs.history(schedule_id=e["id"])))
         provider = seen.get("confirm_provider")
         assert provider is not None
+        assert seen.get("auto_confirm") is False
         assert await provider.confirm("r", "ops.run", {}) is False
+
+    run(main())
+
+
+def test_admin_schedule_auto_approves_only_named_tools(tmp_path):
+    async def main():
+        seen = {}
+
+        async def fake_run(msg, **kw):
+            seen.update(kw)
+            return {"answer": "x", "status": "ok"}
+
+        s, store, runs = _wired(tmp_path, fake_run,
+                                users=_Users(admins=["root"]))
+        e = store.add({"owner": "root", "prompt": "x", "kind": "once",
+                       "auto_approve_tools": ["job.start"],
+                       "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        assert await _wait(lambda: bool(runs.history(schedule_id=e["id"])))
+        provider = seen["confirm_provider"]
+        assert seen["auto_confirm"] is False
+        assert await provider.confirm("r", "job.start", {}) is True
+        assert await provider.confirm("r", "ops.run", {}) is False
+        assert await provider.confirm("r", "git.push", {}) is False
 
     run(main())
 

@@ -55,9 +55,13 @@ def _new_schedule(req: ScheduleCreateRequest, users, projects_dir) -> dict:
         raise HTTPException(status_code=400, detail="prompt is required")
     # created_by="admin" marks the entry as admin-planted: the ticker's
     # revocation sweep leaves it alone when the owner's schedules flag is off.
+    approved = sorted({name.strip() for name in req.auto_approve_tools if name.strip()})
+    if len(approved) > 20 or any(len(name) > 100 for name in approved):
+        raise HTTPException(status_code=400,
+                            detail="auto_approve_tools accepts at most 20 tool names")
     entry: dict = {"owner": req.owner, "prompt": prompt, "kind": req.kind,
                    "project_id": None, "enabled": bool(req.enabled),
-                   "created_by": "admin"}
+                   "created_by": "admin", "auto_approve_tools": approved}
     try:
         if req.kind == "once":
             entry["next_fire"] = parse_when(req.when or "")
@@ -113,6 +117,7 @@ def register(app, s):
     def _view(e: dict) -> dict:
         d = dict(e)
         d.setdefault("last_status", None)
+        d.setdefault("auto_approve_tools", [])
         d["project_name"] = _project_name(e.get("owner"), e.get("project_id"))
         return d
 

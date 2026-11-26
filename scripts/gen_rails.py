@@ -119,8 +119,8 @@ DISPATCH_GATES: list[tuple[str, str, str, str, str]] = [
      "synthesize-now error.", "—"),
     ("privacy", "confirmation.confirm_cloud_calls / privacy.share_private",
      "true / false",
-     "A cloud-LLM call while the conversation holds private tool results "
-     "needs an explicit human ok.", "—"),
+     "A cloud-LLM or web/browser call while the conversation holds private "
+     "tool results needs an explicit human ok.", "—"),
     ("confirmation", "confirmation.enabled", "true",
      "State-changing / admin-grade / cloud calls ask the human before "
      "executing (non-admin sessions: auto_confirm forced off).",

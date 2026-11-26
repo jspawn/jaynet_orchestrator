@@ -278,6 +278,8 @@ class ScheduleCreateRequest(BaseModel):
     project_id: str | None = None            # run inside this project's files
     source: str | None = None                # arxiv = observe-only source watch
     query: str | None = None                 # fixed-source query, never a URL
+    # Only these confirmation-gated tools may run unattended (admin owners).
+    auto_approve_tools: list[str] = []
     enabled: bool = True
 
 

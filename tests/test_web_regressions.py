@@ -854,6 +854,36 @@ async def test_upload_serve_sandboxes_html(web_app, web_client):
         assert "content-security-policy" not in r.headers
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["shtml", "xhtml", "xht"])
+async def test_inline_markup_lookalikes_are_downloads(web_app, web_client, suffix):
+    """Unknown HTML-capable suffixes must not rely on FileResponse's mime guess."""
+    app = web_app()
+    async with web_client(app) as c:
+        pid = (await c.post("/api/projects", json={"name": "p"})).json()["id"]
+        name = f"payload.{suffix}"
+        await c.put(f"/api/projects/{pid}/file", params={"path": name},
+                    content=b"<script>alert(1)</script>")
+        r = await c.get(f"/api/projects/{pid}/download",
+                        params={"path": name, "inline": 1})
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/octet-stream"
+        assert "attachment" in r.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_upload_shtml_is_attachment_not_same_origin_html(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.post("/api/upload", params={"filename": "payload.shtml"},
+                         content=b"<script>alert(1)</script>")
+        att = r.json()["id"]
+        r = await c.get(f"/api/upload/{att}")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/octet-stream"
+        assert "attachment" in r.headers["content-disposition"]
+
+
 # ==============================================================================
 # Pre-public audit fixes: M2 (2FA throttle), M3 (body caps), L6 (logout
 # revocation), L7 (dummy hash), L9 (shared min password length), I3 (PBKDF2
@@ -1192,3 +1222,34 @@ async def test_login_rejects_replayed_totp_code(web_app, web_client):
         r = await c.post("/api/login",
                          json={"username": "admin", "password": "pw", "code": code})
         assert r.status_code == 401                       # replay rejected
+
+
+def test_backup_code_is_consumed_atomically(tmp_path, monkeypatch):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    import web.auth as auth
+    monkeypatch.setattr(
+        auth, "_stored_hash",
+        lambda password, salt: f"1000${auth._hash_pw(password, salt, 1000)}")
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    secret = store.start_enrollment("admin")["secret"]
+    backup = store.confirm_enrollment("admin", auth._totp_at(secret, time.time()))[0]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(
+            lambda _: store.verify_second_factor("admin", backup), range(2)))
+    assert sorted(results) == [False, True]
+    assert store.backup_codes_remaining("admin") == 9
+
+
+def test_api_token_last_used_write_is_rate_limited(tmp_path, monkeypatch):
+    import web.auth as auth
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    token = store.create_api_token("admin", "native")["token"]
+    assert store.verify_api_token(token) == "admin"
+    first = store.list_api_tokens("admin")[0]["last_used"]
+    assert first
+    assert store.verify_api_token(token) == "admin"
+    assert store.list_api_tokens("admin")[0]["last_used"] == first

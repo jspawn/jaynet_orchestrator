@@ -45,11 +45,14 @@ def _run_outcome(out) -> tuple[str, str, int | None]:
             out.get("total_tokens"))
 
 
-class _DenyConfirm:
-    """Scheduled runs have no human available for confirmation prompts."""
+class _ScheduleConfirm:
+    """Approve only tools explicitly named when the schedule was created."""
+
+    def __init__(self, allowed=()):
+        self.allowed = frozenset(allowed)
 
     async def confirm(self, run_id, name, args, emit=None, reason=None):
-        return False
+        return name in self.allowed
 
 
 def _record_run(sched_runs, sched_store, entry: dict, run_id: str | None,
@@ -188,6 +191,8 @@ class ScheduledRunner:
         # Launched work is interrupted on recovery, never replayed automatically.
         if not self.work.mark_launched(attempt["id"]):
             return
+        auto_approved = (entry.get("auto_approve_tools") or []
+                         if self.config.get("auto_confirm", True) and is_admin else [])
         task = asyncio.create_task(self.runtime.run(
             "This is a SCHEDULED run the user set up earlier. Do what the task "
             "says, then give a short, direct report — it lands in the user's "
@@ -196,8 +201,10 @@ class ScheduledRunner:
             is_admin=is_admin,
             work_root=str(wr) if wr else None,
             scratch_key=run_id,
-            auto_confirm=bool(self.config.get("auto_confirm", True)) and is_admin,
-            confirm_provider=_DenyConfirm(),
+            # Never bypass the provider wholesale: it approves only the tools
+            # named on this schedule; legacy/empty lists deny every gated call.
+            auto_confirm=False,
+            confirm_provider=_ScheduleConfirm(auto_approved),
             budget_overrides=self.config.get("budget") or None,
             disabled_tools=(set(self.users.get_global_disabled_tools())
                             | _schedule_tool_gate(self.users, owner or "", is_admin)),

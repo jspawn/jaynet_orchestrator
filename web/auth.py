@@ -22,7 +22,7 @@ import secrets
 import sqlite3
 import struct
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from runtime.env import env
@@ -423,7 +423,7 @@ class UserStore:
                     "name": (name or "")[:60]}
 
     def verify_api_token(self, token: str | None) -> str | None:
-        """Return the owning username for a valid token, else None. Updates last_used."""
+        """Return the owner for a valid token; rate-limit last_used writes."""
         if not token:
             return None
         h = hashlib.sha256(token.encode()).hexdigest()
@@ -432,8 +432,14 @@ class UserStore:
                 "SELECT username FROM api_tokens WHERE token_hash=?", (h,)).fetchone()
             if not row:
                 return None
-            conn.execute("UPDATE api_tokens SET last_used=? WHERE token_hash=?",
-                         (_now(), h))
+            # Android/native clients authenticate every request. Avoid a disk
+            # sync per call by recording activity at most once per minute.
+            now = datetime.now(UTC)
+            cutoff = (now - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            conn.execute(
+                "UPDATE api_tokens SET last_used=? WHERE token_hash=? "
+                "AND (last_used IS NULL OR last_used < ?)",
+                (now.strftime("%Y-%m-%dT%H:%M:%SZ"), h, cutoff))
             return row["username"]
 
     def list_api_tokens(self, username: str) -> list[dict]:
@@ -741,21 +747,28 @@ class UserStore:
         norm = _norm_backup(code)
         if not norm:
             return False
-        u = self._get_row(username)
-        try:
-            entries = json.loads(u["backup_codes"] or "[]")
-        except Exception:
-            entries = []
-        for i, (salt_hex, h) in enumerate(entries):
-            iterations, digest = _split_stored(h)
-            if hmac.compare_digest(_hash_pw(norm, bytes.fromhex(salt_hex), iterations),
-                                   digest):
-                entries.pop(i)
-                with self._conn() as conn:
+        # Hold the SQLite write lock across read/hash/consume. Otherwise two
+        # concurrent requests can both validate the same single-use code before
+        # either writes the shortened list. Callers run this via asyncio.to_thread.
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT backup_codes FROM users WHERE username=?",
+                               (username,)).fetchone()
+            if not row:
+                return False
+            try:
+                entries = json.loads(row["backup_codes"] or "[]")
+            except Exception:
+                entries = []
+            for i, (salt_hex, h) in enumerate(entries):
+                iterations, digest = _split_stored(h)
+                if hmac.compare_digest(
+                        _hash_pw(norm, bytes.fromhex(salt_hex), iterations), digest):
+                    entries.pop(i)
                     conn.execute("UPDATE users SET backup_codes=? WHERE username=?",
                                  (json.dumps(entries), username))
-                return True
-        return False
+                    return True
+            return False
 
     def backup_codes_remaining(self, username: str) -> int:
         u = self._get_row(username)

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
 from runtime.outputs import deliverable_path, read_manifest
-from web.ctx import _PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers, read_capped
+from web.ctx import _classify, _preview_response, _safe_name, read_capped
 
 
 def register(app, s):
@@ -42,8 +41,9 @@ def register(app, s):
         p = _resolve_attachment(request, att_id)
         if not p:
             raise HTTPException(status_code=404, detail="not found")
-        # Uploaded markup is untrusted and served same-origin: sandbox HTML/SVG.
-        return FileResponse(str(p), headers=_sandbox_headers(p.name))
+        # Uploaded markup is untrusted and served same-origin. Only explicit
+        # preview media may render; unknown markup-capable suffixes download.
+        return _preview_response(p)
 
     @app.get("/api/output/{run_id}")
     async def get_output(run_id: str, request: Request, inline: int = 0):
@@ -53,16 +53,8 @@ def register(app, s):
         p = deliverable_path(outputs_dir, run_id, m)
         if not p.is_file():
             raise HTTPException(status_code=404, detail="not found")
-        # Inline (preview in a new tab): omit the attachment filename and send a
-        # real media type so the browser renders it. Archives are never inlined.
+        # Inline previews use the same explicit allowlist as workspaces/uploads.
         if inline and m.get("kind") != "targz":
-            media = _PREVIEW_MEDIA.get(os.path.splitext(p.name.lower())[1],
-                                       "application/octet-stream")
-            headers = {"Content-Disposition": "inline"}
-            if media.split(";")[0] in ("text/html", "image/svg+xml"):
-                # Agent-produced markup is untrusted and served same-origin:
-                # render it, but sandbox it so no script can execute here.
-                headers["Content-Security-Policy"] = "sandbox"
-            return FileResponse(str(p), media_type=media, headers=headers)
+            return _preview_response(p, download_name=m["name"])
         media = "application/gzip" if m.get("kind") == "targz" else "application/octet-stream"
         return FileResponse(str(p), media_type=media, filename=m["name"])

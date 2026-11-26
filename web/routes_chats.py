@@ -223,8 +223,8 @@ def register(app, s):
     # (job.start — tests, training, dataset builds) announces itself in the
     # chat when it reaches a terminal state instead of waiting to be asked.
     # The jobs dir is the source of truth (survives restarts); "finished" is
-    # the exit_code file's mtime. Owner-filtered; jobs from before the owner
-    # field existed (meta without "owner") are visible to everyone.
+    # the exit_code file's mtime. Owner-filtered; legacy jobs without an owner
+    # are hidden because their ownership cannot be established safely.
     @app.get("/api/jobs/finished")
     async def jobs_finished(request: Request):
         from tools.job.runner import _read_meta, _status_of
@@ -242,7 +242,7 @@ def register(app, s):
                 if not d.is_dir():
                     continue
                 meta = _read_meta(d)
-                if meta.get("owner") not in (None, owner):
+                if meta.get("owner") != owner:
                     continue
                 st = _status_of(d)
                 if st.get("state") not in ("succeeded", "failed"):

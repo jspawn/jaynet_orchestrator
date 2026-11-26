@@ -45,11 +45,12 @@ async def test_create_list_delete(tmp_path, web_app, web_client):
     async with web_client(app) as c:
         r = await c.post("/api/admin/schedules", json={
             "owner": "alice", "prompt": "morning report", "kind": "once",
-            "when": "+30m"})
+            "when": "+30m", "auto_approve_tools": ["job.start", "job.start"]})
         assert r.status_code == 200
         entry = r.json()["schedule"]
         assert entry["kind"] == "once" and entry["last_status"] is None
         assert entry["project_name"] is None
+        assert entry["auto_approve_tools"] == ["job.start"]
 
         r = await c.get("/api/admin/schedules")
         assert [s["id"] for s in r.json()["schedules"]] == [entry["id"]]

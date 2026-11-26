@@ -1100,6 +1100,11 @@
     <input id="schedQuery" placeholder="arXiv query, e.g. cat:cs.LG AND abs:diffusion"
       style="display:none;width:100%;margin-top:10px">
     <textarea id="schedPrompt" placeholder="prompt to run (for a watch: future task, currently inert)…" style="margin-top:10px"></textarea>
+    <input id="schedAutoApprove" placeholder="unattended tool approvals, e.g. web.fetch, job.start (optional)"
+      title="Comma-separated tool names. Empty = every confirmation-gated tool is declined. Admin owners only."
+      style="width:100%;margin-top:10px">
+    <p class="muted" style="font-size:12px;margin:.4em 0 0">
+      Auto-approve only named tools; leave empty to decline every gated call.</p>
   </section>
   <section>
     <h2>Schedules <button id="refreshSchedules" style="float:right;font-weight:600">Refresh</button></h2>
@@ -1160,7 +1165,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=23"></script>
+<script src="/static/admin.js?v=24"></script>
 
 </body>
 </html>

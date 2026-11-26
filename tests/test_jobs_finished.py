@@ -25,9 +25,10 @@ def _mkjob(root, jid, name, exit_code=None, owner=None):
 @pytest.mark.asyncio
 async def test_jobs_finished_feed(web_app, web_client, tmp_path, monkeypatch):
     monkeypatch.setattr("runtime.paths.JOBS_DIR", tmp_path)
-    _mkjob(tmp_path, "job-ok", "test-suite", exit_code=0)            # legacy: no owner
-    _mkjob(tmp_path, "job-bad", "train", exit_code=1)
-    _mkjob(tmp_path, "job-ended", "crashed")                         # no exit_code
+    _mkjob(tmp_path, "job-ok", "test-suite", exit_code=0, owner="admin")
+    _mkjob(tmp_path, "job-bad", "train", exit_code=1, owner="admin")
+    _mkjob(tmp_path, "job-legacy", "unknown-owner", exit_code=0)
+    _mkjob(tmp_path, "job-ended", "crashed", owner="admin")            # no exit_code
     _mkjob(tmp_path, "job-other", "not-yours", exit_code=0,
            owner="someone-else")
 
@@ -43,3 +44,4 @@ async def test_jobs_finished_feed(web_app, web_client, tmp_path, monkeypatch):
     assert jobs["job-bad"]["state"] == "failed"
     assert "job-ended" not in jobs          # no exit code → not terminal
     assert "job-other" not in jobs          # owner-filtered
+    assert "job-legacy" not in jobs         # unknown ownership fails closed

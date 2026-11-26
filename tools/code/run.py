@@ -192,14 +192,14 @@ def _spill_streams(out: str, err: str, out_dir: Path | None) -> dict:
 
 
 def _bind_rw(path) -> list[str]:
-    """--read-write bind args for one path. A path under /tmp ALSO needs
-    --whitelist: --private-tmp mounts a fresh tmpfs OVER /tmp after the
-    bind, hiding it (verified: bind alone → ENOENT; +whitelist → works)."""
+    """Expose exactly one writable path inside the python sandbox.
+
+    Whitelisting is required for /tmp (hidden by --private-tmp), and every
+    other path once the workdir whitelist activates Firejail's filesystem
+    allowlist. Without this, artifact/workspace paths become invisible.
+    """
     p = str(path)
-    args = [f"--read-write={p}"]
-    if p.startswith("/tmp/"):
-        args.append(f"--whitelist={p}")
-    return args
+    return [f"--whitelist={p}", f"--read-write={p}"]
 
 
 class CodeRun(Tool):
@@ -783,8 +783,17 @@ class CodeRun(Tool):
                 "--private-tmp",
                 f"--private-cwd={workdir}",
                 "--read-only=/",
+                # Firejail whitelists hide everything outside the named paths.
+                # --read-only=/ alone left users.db, chats and uploads readable.
+                f"--whitelist={workdir}",
                 f"--read-write={workdir}",
             ]
+            # A configured venv must stay visible (interpreter + site-packages).
+            # Do not resolve symlinks here: resolving .venv/bin/python would
+            # whitelist /usr instead of the venv that supplies its packages.
+            interpreter = Path(python)
+            if interpreter.is_absolute() and interpreter.parent.name in ("bin", "Scripts"):
+                cmd.append(f"--whitelist={interpreter.parent.parent}")
             # --read-only=/ blocks writes but not READS — hide $HOME secrets
             # explicitly (AI-2; --noprofile also disables the distro profile
             # that would tmpfs-hide ~/.ssh etc. on some hosts).

@@ -1222,30 +1222,31 @@ class NearDuplicateGate(DispatchGate):
 
 
 class PrivacyGate(DispatchGate):
-    """Privacy gate: a cloud-LLM call while the conversation holds private
-    tool results needs an explicit human ok — the request carries the full
-    call args (the prompt), so the decision is informed. A refusal is a
-    per-call error, never a run-ender: the model can fall back to a local
-    tool. share_private is the blanket opt-in; auto_confirm deliberately
-    does NOT waive this one. The check is target-aware: llm.call aimed at a
-    local alias (incl. the vision slot for image calls) never leaves the
-    box and never gates."""
+    """Gate off-box calls after private tool results.
+
+    Cloud prompts and web/browser requests can both carry private data off the
+    box, so both need explicit per-call approval. share_private is the blanket
+    opt-in; auto_confirm deliberately does NOT waive this gate. Local llm.call
+    targets (including the vision slot) remain ungated.
+    """
 
     name = "privacy"
+    _WEB_PREFIXES = ("web.", "browser.")
 
     async def check(self, plan: dict, rs) -> bool:
         d = self.dctx
         name = plan["name"]
         args = plan["args"]
-        if d.share_private or not rs.private_taint \
-                or not d.runtime._is_cloud_call(name, args):
+        off_box = (d.runtime._is_cloud_call(name, args)
+                   or name.startswith(self._WEB_PREFIXES))
+        if d.share_private or not rs.private_taint or not off_box:
             return False
         if not await d.runtime._confirm_privacy(name, args, d.run_id, d.emit,
                                                 d.confirm_provider):
             plan["result"] = ToolResult(
                 status="error", result=None, tool_name=name,
                 error="blocked by privacy: the conversation contains "
-                      "private tool results and the cloud call was not "
+                      "private tool results and the external call was not "
                       "approved. Use a local tool/model instead, or ask "
                       "the user to enable 'share with cloud' for this run.")
             return True

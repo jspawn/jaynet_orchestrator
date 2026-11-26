@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from fastapi import HTTPException
+from fastapi.responses import FileResponse
 
 from runtime.env import env
 
@@ -131,3 +132,17 @@ def _sandbox_headers(filename: str) -> dict:
     if media.split(";")[0] in ("text/html", "image/svg+xml"):
         return {"Content-Security-Policy": "sandbox"}
     return {}
+
+
+def _preview_response(path, download_name: str | None = None) -> FileResponse:
+    """Preview only explicit safe media; every other type is an attachment.
+
+    FileResponse's mimetypes guess would otherwise serve .shtml/.xhtml as
+    executable same-origin markup without the HTML sandbox header.
+    """
+    media = _PREVIEW_MEDIA.get(os.path.splitext(path.name.lower())[1])
+    if media is None:
+        return FileResponse(str(path), media_type="application/octet-stream",
+                            filename=download_name or path.name)
+    headers = {"Content-Disposition": "inline", **_sandbox_headers(path.name)}
+    return FileResponse(str(path), media_type=media, headers=headers)

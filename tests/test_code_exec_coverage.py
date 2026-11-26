@@ -8,7 +8,9 @@ is redirected to tmp_path via tools.code.workdir so nothing touches /srv.
 """
 import asyncio
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -91,6 +93,47 @@ def test_firejail_command_construction(monkeypatch, exec_ctx, tmp_path):
     # is cleaned up afterwards
     assert "sys.path" in calls[0]["script"] and "print('hi')" in calls[0]["script"]
     assert list((tmp_path / "sandbox").iterdir()) == []
+    workdir = next(c.split("=", 1)[1] for c in cmd if c.startswith("--private-cwd="))
+    assert f"--whitelist={workdir}" in cmd
+
+
+@pytest.mark.skipif(EX.shutil.which("firejail") is None, reason="firejail not installed")
+def test_python_firejail_cannot_read_data_dir(exec_ctx):
+    """Regression for the reproduced users.db disclosure, using dummy data only.
+
+    The sandbox base must be outside /tmp because --private-tmp would otherwise
+    hide the probe for an unrelated reason.
+    """
+    from runtime import paths
+
+    base = Path(tempfile.mkdtemp(prefix=".sandbox-test-", dir=paths.HOME))
+    secret = base / "data" / "users.db"
+    secret.parent.mkdir()
+    secret.write_text("dummy-secret")
+    exec_ctx.config["tools"]["code"].update({
+        "workdir": str(base / "sandbox"), "python": sys.executable})
+    snippet = (
+        "from pathlib import Path\n"
+        f"p = Path({str(secret)!r})\n"
+        "try:\n"
+        "    print('readable:' + p.read_text())\n"
+        "except OSError:\n"
+        "    print('hidden')\n")
+    try:
+        r = asyncio.run(CodeRun().execute(
+            {"command": snippet, "language": "python"}, exec_ctx))
+        assert r.status == "ok"
+        assert r.result["stdout"].strip() == "hidden", r.result
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_python_firejail_whitelists_configured_venv(monkeypatch, tmp_path):
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    python = str(tmp_path / ".venv" / "bin" / "python")
+    cmd = CodeRun()._build_python_cmd("s.py", "firejail", tmp_path / "work",
+                                      None, python, 1024)
+    assert f"--whitelist={tmp_path / '.venv'}" in cmd
 
 
 def test_fallback_when_firejail_missing(monkeypatch, exec_ctx):

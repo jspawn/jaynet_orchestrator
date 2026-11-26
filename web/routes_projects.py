@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from runtime import hooks as _hooks
 from web import projects as PJ
-from web.ctx import _sandbox_headers
+from web.ctx import _preview_response
 
 
 def register(app, s):
@@ -79,10 +79,7 @@ def register(app, s):
         if p is None or not p.is_file():
             raise HTTPException(status_code=404, detail="no such file")
         if inline:
-            # in-browser preview (e.g. <img> in the file explorer): media type
-            # guessed from the suffix, no forced attachment disposition. HTML/SVG
-            # are untrusted same-origin markup — served sandboxed (no script).
-            return FileResponse(str(p), headers=_sandbox_headers(p.name))
+            return _preview_response(p)
         return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
     @app.put("/api/projects/{pid}/file")
@@ -174,7 +171,7 @@ def register(app, s):
         if p is None or not p.is_file():
             raise HTTPException(status_code=404, detail="no such file")
         if inline:
-            return FileResponse(str(p), headers=_sandbox_headers(p.name))
+            return _preview_response(p)
         return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
     @app.put("/api/chat-scratch/{cid}/file")

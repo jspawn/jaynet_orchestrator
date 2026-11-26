@@ -5,6 +5,19 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.52.1 — 2026-11-26
+
+- **Sandbox and preview security:** Python Firejail whitelists hide JayNet's
+  data stores outside explicit work/artifact paths. Inline previews use a safe
+  media allowlist; HTML-capable unknown suffixes download instead of executing.
+- **Privacy and schedules:** private-tainted web/browser calls need explicit
+  approval. Scheduled runs auto-approve only tools named in their new
+  `auto_approve_tools` list; empty and legacy entries deny every gated call.
+- **Smaller hardening:** atomic backup-code consumption, non-blocking 2FA,
+  ownerless-job filtering, tighter `ops.run` validation, and rate-limited API
+  token `last_used` writes.
+- **Verification:** 2,907 tests pass, plus all release gates.
+
 ## 1.52.0 — 2026-11-26
 
 - **Durable memory:** substantive requests can automatically recall up to three

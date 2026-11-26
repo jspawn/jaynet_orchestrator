@@ -86,7 +86,8 @@ def register(app, s):
             if not req.code:
                 # distinct code so the UI can reveal the 2FA field (not a failure)
                 raise HTTPException(status_code=401, detail="totp_required")
-            if not users.verify_second_factor(req.username, req.code):
+            if not await asyncio.to_thread(users.verify_second_factor,
+                                           req.username, req.code):
                 throttle.record_failure(key)
                 raise HTTPException(status_code=401, detail="invalid two-factor code")
         throttle.record_success(key)
@@ -272,7 +273,8 @@ def register(app, s):
         if ra:
             return JSONResponse({"detail": "too many attempts; try again later"},
                                 status_code=429, headers={"Retry-After": str(ra)})
-        codes = users.confirm_enrollment(u["username"], req.code)
+        codes = await asyncio.to_thread(users.confirm_enrollment,
+                                        u["username"], req.code)
         if codes is None:
             throttle.record_failure(key)
             raise HTTPException(status_code=400, detail="invalid or expired code")
@@ -291,7 +293,8 @@ def register(app, s):
         if ra:
             return JSONResponse({"detail": "too many attempts; try again later"},
                                 status_code=429, headers={"Retry-After": str(ra)})
-        if not users.verify_second_factor(u["username"], req.code):
+        if not await asyncio.to_thread(users.verify_second_factor,
+                                       u["username"], req.code):
             throttle.record_failure(key)
             raise HTTPException(status_code=401, detail="invalid two-factor code")
         throttle.record_success(key)

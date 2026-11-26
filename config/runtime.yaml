@@ -1216,9 +1216,9 @@ tools:
     # tab. Non-admin users manage their own entries via the schedule.* chat
     # tools only while the per-user schedules_allowed flag is granted
     # (admin → Users); revoking it auto-disables their entries at the tick.
-    # Scheduled runs are unattended: gated tool calls auto-approve — consent was
-    # given at schedule time (schedule.add is confirmation-gated). Cloud spend
-    # is still bounded by the budget below.
+    # Scheduled runs are unattended: only tools named in each entry's
+    # auto_approve_tools list may auto-approve (admin owners only). Everything
+    # else is declined; cloud spend is still bounded by the budget below.
     auto_confirm: true
     budget: {max_iterations: 12, max_cost_usd: 0.25, max_total_tokens: 250000}
 

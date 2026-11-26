@@ -42,7 +42,7 @@ error as its tool result.
 | 11 | `fresh_retry` | tool_call | `agent.fresh_retry.enabled / .after` | true / 2 | Same task cluster delegated again after N failures: the child gets the raw original request, de-anchored. | — |
 | 12 | `duplicate` | tool_call | `— (mutation-generation scoped, poll-safe exempt)` | 2× | The exact same call already ran twice with nothing it reads changed — the result would be identical. | — |
 | 13 | `near_duplicate` | tool_call | `loop_guard.near_dup_threshold / .near_dup_tools` | 0.75 | Query-like tools: a third reworded-but-similar call is blocked with a synthesize-now error. | — |
-| 14 | `privacy` | tool_call | `confirmation.confirm_cloud_calls / privacy.share_private` | true / false | A cloud-LLM call while the conversation holds private tool results needs an explicit human ok. | — |
+| 14 | `privacy` | tool_call | `confirmation.confirm_cloud_calls / privacy.share_private` | true / false | A cloud-LLM or web/browser call while the conversation holds private tool results needs an explicit human ok. | — |
 | 15 | `confirmation` | tool_call | `confirmation.enabled` | true | State-changing / admin-grade / cloud calls ask the human before executing (non-admin sessions: auto_confirm forced off). | audit #1 (Sep 2026) |
 
 ## Post-tool guards (runtime/turn_guards.py POST_TOOL_GUARDS)

@@ -32,8 +32,11 @@ routes (`/api/admin/studio`) are admin-gated — at runtime they are as
 trusted as any built-in and stay invocable by all accounts;
 file tools are confined to the run's workspace; URL tools resolve and block
 loopback/link-local/CGNAT targets and re-check every redirect hop;
-`deliver.files` only hands over workspace files; HTML/SVG downloads are served
-with `Content-Security-Policy: sandbox`. The LiteLLM proxy binds 127.0.0.1
+`deliver.files` only hands over workspace files; inline previews use an explicit
+media allowlist, HTML/SVG get `Content-Security-Policy: sandbox`, and unknown
+markup-capable suffixes download as octet-stream attachments. Sandboxed Python
+uses Firejail whitelists for only its work/artifact paths and configured venv.
+The LiteLLM proxy binds 127.0.0.1
 only, so `LITELLM_MASTER_KEY` is optional for localhost-only installs — set it
 if the proxy is ever exposed beyond localhost. The session cookie's Secure
 flag (`web.cookie_secure`) defaults to false so the plain-HTTP console keeps
@@ -56,14 +59,11 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   confirmation gating for their own runs; for non-admin sessions
   (chat, goals, voice, schedules) the server forces it off. The privacy gate
   (what may leave the box) is *not* bypassable either way. **Scheduled runs
-  fire with `auto_confirm: true` by default** — but only when the schedule's
-  owner is an admin, and `schedule.add` itself is gated per user (admin or
-  the `schedules_allowed` flag, Admin → Users). One approved `schedule.add`
-  from an admin plants a recurring run that auto-approves every gated tool
-  (`job.start`, `ops.run`, `git.push`, …) on each firing, indefinitely. Only
-  schedule prompts you would trust with unattended approval; set the global
-  `tools.schedule.auto_confirm: false` if scheduled runs should never
-  auto-approve. **A goal's
+  auto-approve only the tools named in each entry's `auto_approve_tools` list**,
+  and only for an admin owner with global `tools.schedule.auto_confirm` enabled.
+  Empty and legacy lists decline every gated call; non-admin entries always
+  decline. Keep that list minimal: it applies on every firing, indefinitely.
+  **A goal's
   `| check:` command runs unattended too** — `/loop`/`/goal` with a
   `| check: <cmd>` executes that
   shell command as the service user (cwd = the goal's workspace, env
@@ -74,12 +74,10 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   parsed only from the user's own slash message — prompt injection cannot
   reach it — so this is the same trust shape as a schedule you planted
   yourself: only `| check:` commands you would trust to fire unattended.
-- **Outbound GETs are ungated.** The privacy gate controls what reaches cloud
-  *LLM* tools, but a prompt-injected agent holding private in-context data
-  could send it off-box inside a `web.fetch`/`web.request` URL (GET/HEAD are
-  ungated; POST+ is gated). URL length limits the bulk. If this matters for
-  your deployment, gate the web tools (Admin → Harness → Tools) or keep private data
-  out of web-enabled runs.
+- **Private-tainted web calls need explicit approval.** Cloud LLM and
+  web/browser calls are privacy-gated after private tool results, including
+  GET/HEAD and admin auto-confirm runs. `share_private` is the blanket opt-in.
+  Untainted outbound GETs remain ungated; POST+ keeps its normal confirmation.
 - **Self-re-injection amplifies planted content.** `note.set`, `context.pin`,
   the working anchor and the `todos` list re-feed model-authored text to
   every later turn, even after the source message is compacted away. That
