@@ -125,8 +125,12 @@ async def test_bearer_token_shares_token_row(web_app, web_client):
     assert app.state.chats.get_current("_token")["chat"] == SNAP
 
 
-def test_transient_stream_errors_keep_native_reconnect():
-    """A dropped SSE connection must not discard the live run or its replay."""
+def test_stream_errors_reconnect_and_recover_finished_runs():
+    """Dropped SSE must not discard a live run or an already-finished answer."""
     source = (Path(__file__).parent.parent / "web/static/app.js").read_text()
-    assert source.count("es.readyState===EventSource.CONNECTING") == 2
+    assert source.count("es.readyState===EventSource.CONNECTING") == 1
     assert source.count('setStatus("stream interrupted — reconnecting…", true)') == 2
+    assert 'fetch("/api/v1/runs/"+runId)' in source
+    assert 'answer:d.final_answer||""' in source
+    assert "turns.push(full(pending))" in source
+    assert "pending = resumed ||" in source

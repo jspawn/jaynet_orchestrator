@@ -50,6 +50,26 @@ def _targets(diff: str) -> list[str]:
     return seen
 
 
+def _normalize_blank_context(diff: str) -> str:
+    """Repair empty context lines inside hunks (a common local-model typo).
+
+    Unified diffs prefix context with one space, including visually blank lines.
+    A truly empty line can only mean blank context here: additions and removals
+    still carry their + / - marker. Outside hunks the text stays verbatim.
+    """
+    out: list[str] = []
+    in_hunk = False
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("@@ "):
+            in_hunk = True
+        elif line.startswith(("diff --git ", "--- ")):
+            in_hunk = False
+        if in_hunk and line in ("\n", "\r\n"):
+            line = " " + line
+        out.append(line)
+    return "".join(out)
+
+
 async def _git_apply(base: Path, diff_path: Path, *flags: str) -> tuple[int, str, str]:
     # GIT_SAFE_FLAGS like every other git call site (audit finding 6): the
     # workspace may carry a hostile .git config (hooks, fsmonitor).
@@ -64,7 +84,9 @@ class CodePatch(Tool):
         "Apply a unified diff (git diff / diff -u format) to files under a base "
         "directory — a coherent multi-hunk, multi-file edit in one atomic step. "
         "Prefer this over repeated fs.edit calls for larger changes. Use dry_run "
-        "to validate the patch applies cleanly before committing to it."
+        "to validate the patch applies cleanly before committing to it. Context "
+        "lines, including blank ones, start with one space; default strip=1 "
+        "matches a/ and b/ path prefixes."
     )
     private = True
     requires_confirmation = True
@@ -103,6 +125,7 @@ class CodePatch(Tool):
         if not diff.strip():
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="empty diff")
+        diff = _normalize_blank_context(diff)
         strip = int(args.get("strip", 1))
 
         # Bounds-check every target path against the allowed roots first.

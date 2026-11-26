@@ -5,6 +5,18 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.51.1 — 2026-11-26
+
+- **Chat recovery:** closed SSE connections now consult the authoritative run
+  status, reconnect while the run is live and restore completed answers after
+  the in-memory replay expires. In-flight prompts sync at run start, so reloading
+  or switching devices no longer discards the prompt and partial turn.
+- **Patch robustness:** `code.patch` normalizes truly empty context lines inside
+  unified-diff hunks into the required single-space prefix. Its description and
+  the selftest playbook now document blank context and default `strip=1`
+  handling for `a/`/`b/` paths, reducing avoidable local-model retries.
+- **Verification:** the full test suite and all release gates pass.
+
 ## 1.51.0 — 2026-11-26
 
 - **Unified Saber integration:** model-family dispatch now uses each native

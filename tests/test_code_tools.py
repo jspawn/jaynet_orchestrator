@@ -104,6 +104,28 @@ def test_code_patch_recounts_model_hunk_headers(git_repo, ctx):
     assert "## Tier 3 — service-gated" in out and out.endswith("Validated.\n\n")
 
 
+def test_code_patch_normalizes_blank_context_lines(git_repo, ctx):
+    """A model's empty context line means one space in unified-diff syntax."""
+    (git_repo / "selftest_probe.py").write_text(
+        "def probe_alpha():\n"
+        "    return 'alpha'\n\n"
+        "def probe_beta():\n"
+        "    return probe_alpha() + '-beta'\n\n"
+        "if __name__ == '__main__':\n"
+        "    print(probe_beta())\n")
+    diff = ("--- a/selftest_probe.py\n"
+            "+++ b/selftest_probe.py\n"
+            "@@ -7,3 +7,4 @@\n"
+            "\n"
+            " if __name__ == '__main__':\n"
+            "     print(probe_beta())\n"
+            "+# selftest patch ok\n")
+    r = run(CodePatch().execute({"diff": diff, "base_dir": str(git_repo)}, ctx()))
+    assert r.status == "ok", r.error
+    assert (git_repo / "selftest_probe.py").read_text().endswith(
+        "    print(probe_beta())\n# selftest patch ok\n")
+
+
 def test_code_patch_recount_does_not_save_wrong_context(git_repo, ctx):
     """--recount fixes counts, not context: a hunk whose context lines don't
     match must still fail."""

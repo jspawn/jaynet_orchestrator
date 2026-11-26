@@ -39,6 +39,8 @@ workspace-root path confusion). The chains:
 
 - **file:** `fs.write` a tiny file → then `fs.read` / `fs.edit` / `fs.find` / `code.symbols` /
   `code.tree` / `code.patch` / `lint.run` / `deliver.files` / `pdf.create` on **that returned path**.
+  For `code.patch`, keep the default `strip=1` for `a/`/`b/` paths; every context
+  line, including a blank one, starts with one space in unified-diff format.
 - **rag:** `rag.index` one short string into a `selftest` collection → `rag.search` it →
   `rag.collections` → `rag.delete` the collection.
 - **memory:** `memory.append` a `selftest`-tagged note → `memory.search` for it → `memory.delete`

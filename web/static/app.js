@@ -218,8 +218,12 @@ function chatSnapshot(){
   const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"", events:t.events||[],
                   compacted:t.compacted||null, atts:t.atts||[], time:t.time||null});
-  return { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
-           turns:chat.turns.map(full) };
+  const turns=chat.turns.map(full);
+  // Sync the in-flight turn too: a reload or another device needs the original
+  // prompt even before the first model event arrives.
+  if(pending && currentRun && !chat.turns.some(t=>t.run_id===pending.run_id))
+    turns.push(full(pending));
+  return { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved, turns };
 }
 function persistChat(){
   // Keep the FULL per-turn timeline so a reload restores tool rows + commentary even
@@ -1522,16 +1526,25 @@ function expireCards(){
 function openStream(runId){
   es=new EventSource("/api/stream/"+runId);
   currentRun=runId;
+  if(pending){ pending.run_id=runId; pending.status="running"; }
   LS.setItem("jaynet.activeRun", runId);   // persist for reconnect on refresh
   syncChatServer();                        // lets OTHER devices attach mid-run
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
-  const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
+  const handle = ev => {
+    if(pending){
+      if(ev.type==="run_start" && pending.user_message==="(reconnected)"
+         && ev.data.message && ev.data.message!=="(fast-path)")
+        pending.user_message=ev.data.message;
+      pending.events.push(ev);
+    }
+    applyEvent(cur, ev);
+  };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
    "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","markup_leak","requirements_gate","todos","badge","guard_fired"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));
-  es.addEventListener("run_finish", onEv(ev=>{
+  const finish = ev => {
     if(pending) pending.events.push(ev);
     if(ev.data.prompt_tokens){
       // Calibrate the ctx meter: real first-turn prompt minus the chat text we
@@ -1574,19 +1587,54 @@ function openStream(runId){
     LS.removeItem("jaynet.activeRun");
     expireCards();              // no live approve/ask cards past the end
     drainQueue();               // a queued follow-up fires as its own turn
-  }));
-  // CONNECTING is a transient drop: keep the native EventSource retry alive so
-  // Last-Event-ID resumes the run. Only CLOSED is terminal (401/404/413).
+  };
+  es.addEventListener("run_finish", onEv(finish));
+
+  const terminal = () => {
+    if(es){ es.close(); es=null; }
+    if(pending && pending.user_message==="(reconnected)"){
+      if(cur && cur.root && !cur.root.querySelector(".seg")) cur.root.remove();
+      pending=null;
+    }
+    currentRun=null; cur=null;
+    LS.removeItem("jaynet.activeRun");
+    setStatus("stream lost — the run may still finish server-side; reload to reconnect", false);
+    drainQueue();
+  };
+  const recover = async () => {
+    if(currentRun!==runId) return;
+    try{
+      const r=await fetch("/api/v1/runs/"+runId);
+      if(r.ok){
+        const d=await r.json();
+        if(currentRun!==runId) return;
+        if(d.status!=="running"){
+          // The run finished and its in-memory replay may already be gone.
+          finish({run_id:runId, data:{status:d.status, answer:d.final_answer||""}});
+          return;
+        }
+        // Some proxies close SSE cleanly instead of letting EventSource retry.
+        // Poll the authoritative run state, then reopen while it is still live.
+        setStatus("stream interrupted — reconnecting…", true);
+        setTimeout(()=>{
+          if(currentRun!==runId) return;
+          if(es){ es.close(); es=null; }
+          currentRun=null;
+          openStream(runId);
+        },1000);
+        return;
+      }
+    }catch(_){}
+    if(currentRun===runId) terminal();
+  };
+  // CONNECTING uses the browser's native Last-Event-ID retry. CLOSED needs the
+  // status fallback above: it can mean either a proxy EOF or a finished run.
   es.onerror=()=>{
     if(es && es.readyState===EventSource.CONNECTING){
       setStatus("stream interrupted — reconnecting…", true);
       return;
     }
-    if(es){ es.close(); es=null; }
-    currentRun=null; cur=null;
-    LS.removeItem("jaynet.activeRun");
-    setStatus("stream lost — the run may still finish server-side; reload to reconnect", false);
-    drainQueue();
+    recover();
   };
 }
 /* ---------- chat attachments ---------- */
@@ -2755,26 +2803,17 @@ async function init(){
   // snapshot's active_run makes this work across devices, not just browsers.
   const activeRun = (srv && srv.active_run) || LS.getItem("jaynet.activeRun");
   if(activeRun && !es && !currentRun){
-    // Just try to reconnect the SSE stream — the EventBus replays buffered
-    // events, so we'll see everything that happened while we were away.
-    // If the run is gone (404), the stream will error and we clean up.
+    // Recover the original in-flight prompt synced at run start. Older snapshots
+    // fall back to the run_start replay, then to a generic reconnected label.
+    let resumed=null;
+    const idx=chat.turns.findIndex(t=>t.run_id===activeRun
+                                   && (!t.status || t.status==="running"));
+    if(idx>=0){ resumed=chat.turns.splice(idx,1)[0]; renderChatTurns(); }
     cur = startResponse();
-    pending = {user_message:"(reconnected)", answer:"", run_id:activeRun, status:"running",
-               trajectory:"", events:[]};
+    pending = resumed || {user_message:"(reconnected)", answer:"", run_id:activeRun,
+                          status:"running", trajectory:"", events:[]};
     setStatus("reconnecting…", true);
     openStream(activeRun);
-    // Keep native retries for transient drops; clean up only a terminal error.
-    es.onerror = () => {
-      if(es && es.readyState===EventSource.CONNECTING){
-        setStatus("stream interrupted — reconnecting…", true);
-        return;
-      }
-      LS.removeItem("jaynet.activeRun");
-      if(es){ es.close(); es=null; }
-      currentRun=null;
-      if(cur && cur.root && !cur.root.querySelector(".seg")){ cur.root.remove(); cur=null; }
-      setStatus("ready", false);
-    };
   }
 
   // The cost ceiling only matters when a run may leave the house — show it
