@@ -173,7 +173,12 @@ class TestRun(Tool):
         if bad:
             return ToolResult(status="error", result=None, error=bad)
 
-        python = cfg.get("python", "python")
+        python = str(cfg.get("python", "python"))
+        # Configured relative paths anchor to JAYNET_HOME, not the temporary
+        # pytest workdir. Bare `python` still resolves through PATH.
+        if not Path(python).is_absolute() and python != Path(python).name:
+            from runtime.paths import HOME
+            python = str((HOME / python).resolve())
         venv_bin = str(Path(python).parent)
         pp = _pythonpath(ctx, args.get("pythonpath"))
         default_cmd = f"{shlex.quote(python)} -m pytest -q"
@@ -252,6 +257,10 @@ class TestRun(Tool):
             err_msg = None if parsed["ok"] else (
                 "no tests collected" if parsed["no_tests"]
                 else f"{parsed['failed']} failed, {parsed['errors']} errors")
+            if err_msg and (err or out):
+                # A launch failure (bad interpreter, missing pytest plugin) has
+                # no pytest summary — don't leave a misleading "0 failed" alone.
+                err_msg += ": " + (err or out).strip()[-500:]
             return ToolResult(status=status, result=parsed, error=err_msg)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)

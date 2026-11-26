@@ -76,3 +76,13 @@ def test_custom_prefix_honored(ctx, monkeypatch, tmp_path):
                      lambda name: f"/usr/bin/{name}")
     assert res.status == "ok"
     assert argv[:2] == ["bwrap", "--unshare-net"]
+
+
+def test_relative_python_anchors_to_jaynet_home(ctx, monkeypatch, tmp_path):
+    """The configured .venv must not be resolved inside the pytest tempdir."""
+    home = tmp_path / "home"
+    monkeypatch.setattr("runtime.paths.HOME", home)
+    res, argv = _run(ctx, monkeypatch, tmp_path, {"python": ".venv/bin/python"},
+                     lambda name: f"/usr/bin/{name}")
+    assert res.status == "ok"
+    assert argv[-1].startswith(str(home / ".venv/bin/python") + " ")

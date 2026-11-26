@@ -59,7 +59,11 @@ model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
   at a dominant position, the verifier is reachable; only then run `verify.score`/`verify.rank`.
   If the probe says the verifier is down, mark score/rank **skipped (verifier not serving)**, not failed.
 - **council:** needs its panel models up — check `ops.status` shows brain + a specialist; otherwise
-  skip with that note.
+  skip with that note. An intentionally empty specialist slot is **skipped**, not a bug — confirm
+  with `model.list`/`serve.list` before calling a static `:8080` ping "down".
+- **browser:** `browser.browse open` once → `snapshot`/`extract`/`screenshot` in that session →
+  `read` only at the end (read is one-shot and CLOSES the session). If `open` times out, check
+  `status` once before retrying; cold startup may finish in the background.
 - **[cost] llm:** *(full mode)* one 1-token prompt like "ping".
 - **[side-effect] serve/model:** `serve.list`/`serve.status` are always safe. Only in full mode,
   `serve.start` a small embedding model (or `model.use` a preset) → confirm health → `serve.stop`.
