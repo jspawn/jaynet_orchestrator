@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.52.0 — 2026-11-26
+
+- **Durable memory:** substantive requests can automatically recall up to three
+  owner-scoped memories before the first model turn. Explicit "remember/store …"
+  requests are captured once with clear provenance, and the model is told not to
+  duplicate the write. Both behaviors are configurable and respect disabled tools
+  and run allowlists.
+- **Cross-run evaluation:** `isolate_turns: true` gives every eval turn fresh
+  conversation history while retaining the same sandboxed memory, RAG and project
+  stores. The new `memory-cross-run` case verifies that a preference stored in one
+  conversation can be retrieved in another.
+- **Verification:** 2,895 tests pass, plus all release gates. The new eval still
+  needs a live-brain run after deployment.
+
 ## 1.51.2 — 2026-11-26
 
 - **Test runner:** `test.run` resolves configured relative Python interpreters

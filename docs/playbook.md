@@ -356,6 +356,15 @@ holds raw sources, the wiki holds the synthesis. `kg.*` and `memory.*` even
 share one SQLite file — one "world model" substrate, structured and unstructured
 halves.
 
+Automatic knowledge handling stays deliberately narrow: explicit “remember/store
+…” requests are persisted once, and substantive depth-0 requests search up to
+three owner-scoped memories with a 1,600-char evidence cap. Small talk and slash
+commands are skipped. Graphify's existing project banner supplies structural
+context; RAG still requires a configured or named collection. Specialists retain
+read access to the same stores rather than receiving a second knowledge silo.
+The `memory-cross-run` eval clears conversation history between turns while
+retaining sandbox stores, so this measures durable recall instead of an echo.
+
 ### Delegation & model power — `agent.spawn`, `specialist.delegate`, `llm.call`, `council.debate`, `serve.*`, `model.*`
 
 Six ways to spend model cycles, each with a distinct job:

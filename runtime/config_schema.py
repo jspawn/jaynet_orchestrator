@@ -108,6 +108,8 @@ class RoutingNudgeConfig(_Section):
 
 class RecallConfig(_Section):
     enabled: bool = True
+    auto_memory: bool = True
+    capture_explicit: bool = True
     max_chars: int = 1600
     collection: str | None = None
     min_score: float = 0.5

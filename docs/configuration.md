@@ -86,10 +86,12 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Tool Selection** — which tools the model sees: `auto` = core set +
   keyword-triggered namespaces, with `tools.load` as the mid-run escape
   hatch. The `keyword_namespaces.*` entries are the trigger word lists.
-  `recall.*` prefetches owner-scoped memory only on explicit recall intent;
-  RAG joins in when a collection is configured or named in the request.
-  Retrieval is local, depth-0 only and capped by `max_chars`; private hits
-  taint the run as usual. Automatic RAG is off while `collection` is null.
+  `recall.*` searches owner-scoped memory before substantive requests
+  (`auto_memory`) and persists explicit “remember/store …” requests once
+  (`capture_explicit`). RAG joins in when a collection is configured or named
+  in the request. Retrieval is local, depth-0 only and capped by `max_chars`;
+  private hits taint the run as usual. Automatic RAG is off while `collection`
+  is null.
 - **Compaction** — superseded file-read deduplication and old-result stubs;
   execution logs keep their command, exit code, head and error tail, and only
   the newest image stays inline. Controls: read dedupe, size threshold,

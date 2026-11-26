@@ -15,6 +15,7 @@ Schema (see evals/ for examples):
     name: Web search uses current year
     tags: [web, freshness]          # bulk-run by tag
     driver: scripted                # scripted | adaptive (driver model writes follow-ups)
+    isolate_turns: false            # true = fresh history each turn, same sandbox stores
     turns:                          # scripted: every turn; adaptive: seed turn(s)
       - user: "What does a Pilatus astronomy evening cost this autumn?"
       - user: "and for two kids?"
@@ -110,7 +111,8 @@ DRIVERS = ("scripted", "adaptive")
 TOOL_SELECTION_MODES = ("static", "auto")
 CASE_KEYS = ("id", "name", "tags", "driver", "turns", "expect",
              "judge_rubric", "judge", "requires_tools", "project", "container",
-             "budget", "stub_tools", "tool_selection", "fixtures", "recall")
+             "budget", "stub_tools", "tool_selection", "fixtures", "recall",
+             "isolate_turns")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
                "max_iterations", "ask_reply", "canary_not_in_tool_args",
@@ -142,6 +144,7 @@ class EvalCase:
     tool_selection: str = "static"                      # static | auto
     fixtures: dict = field(default_factory=dict)        # seed-only memory/rag entries
     recall: dict = field(default_factory=dict)          # fixtures + prefetch collection
+    isolate_turns: bool = False                         # fresh history; sandbox stores persist
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -158,6 +161,7 @@ class EvalCase:
                 "tool_selection": self.tool_selection,
                 "fixtures": self.fixtures,
                 "recall": self.recall,
+                "isolate_turns": self.isolate_turns,
                 "origin": self.origin}
 
 
@@ -361,6 +365,7 @@ class _CaseModel(BaseModel):
     tool_selection: object = "static"
     fixtures: _RecallModel | None = None
     recall: _RecallModel | None = None
+    isolate_turns: StrictBool = False
 
     @field_validator("id")
     @classmethod
@@ -539,6 +544,7 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         tool_selection=raw.get("tool_selection", "static"),
         fixtures=dict(raw.get("fixtures") or {}),
         recall=dict(raw.get("recall") or {}),
+        isolate_turns=bool(raw.get("isolate_turns", False)),
         origin=origin,
     )
 

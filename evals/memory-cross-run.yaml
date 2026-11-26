@@ -1,0 +1,21 @@
+id: memory-cross-run
+name: Durable memory survives a fresh conversation
+tags: [memory, recall, cross-run]
+driver: scripted
+# Each turn is a separate conversation; the sandboxed memory store persists.
+isolate_turns: true
+recall:
+  collection: null
+turns:
+  - user: "Please remember for good: for lunar viewing I picked the 25 mm Plössl eyepiece."
+  - user: "Which eyepiece did I pick for lunar viewing?"
+requires_tools: [memory.append, memory.search]
+expect:
+  must_use_tools: [memory.append, memory.search]
+  answer_contains_any: ["25 mm"]
+  max_iterations: 6
+judge_rubric: |
+  Pass only if turn 1 stored the eyepiece preference and turn 2, WITHOUT any
+  conversation history from turn 1, retrieved it from persistent memory and
+  answered 25 mm Plössl. A guessed answer or an answer based on chat history
+  fails. Automatic memory.append/memory.search calls satisfy the tool checks.

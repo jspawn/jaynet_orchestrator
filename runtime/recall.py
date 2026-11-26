@@ -1,9 +1,10 @@
-"""Scoped, read-only local recall before a depth-0 model turn.
+"""Scoped local memory capture and recall before a depth-0 model turn.
 
-Recall is deliberately intent-gated: ordinary chat must not pay retrieval
-latency or receive unrelated private context. Writes and indexing stay with
-the model/user. The existing tools provide owner scoping, storage and search;
-this module only decides when to call them and how to cap their excerpts.
+Explicit storage requests can be persisted deterministically. Recall uses local
+memory for substantive requests when auto_memory is enabled; RAG remains
+intent/collection-gated so embeddings and unrelated corpus excerpts stay off
+the hot path. Existing tools provide owner scoping, storage and search; this
+module only decides when to call them and how to cap their excerpts.
 """
 
 from __future__ import annotations
@@ -22,6 +23,13 @@ def raw_recall_query(override: Any, user_message: Any) -> str:
 _STORAGE_REQUEST = re.compile(
     r"^\s*(?:please\s+)?(?:remember|forget|memorize|save|store|note|don't forget)\b",
     re.IGNORECASE)
+_CAPTURE_REQUEST = re.compile(
+    r"^\s*(?:please\s+)?(?:remember|memorize|save|store|note|don't forget)\b(?P<body>.*)$",
+    re.IGNORECASE | re.DOTALL)
+_CAPTURE_FILLER = re.compile(
+    r"^\s*(?:(?:this|that|for\s+(?:good|later|next\s+time)|in\s+(?:your\s+)?"
+    r"(?:long[- ]term\s+)?memory)\b[\s,:-]*)+",
+    re.IGNORECASE)
 _STOPWORDS = {
     "about", "again", "are", "can", "could", "did", "does", "for", "from",
     "have", "how", "into", "know", "memory", "much", "our", "please", "recall",
@@ -38,7 +46,11 @@ def recall_intents(query: str, config: dict) -> set[str]:
                 .get("keyword_namespaces") or {})
     intents = set()
     if not _STORAGE_REQUEST.search(query):
-        if any(str(k).lower() in text for k in keywords.get("memory") or ()):
+        memory_intent = any(str(k).lower() in text for k in keywords.get("memory") or ())
+        auto = ((config.get("tool_selection") or {}).get("recall") or {})
+        if memory_intent or (auto.get("auto_memory", False)
+                             and not query.lstrip().startswith("/")
+                             and len(memory_query(query).split(" OR ")) >= 2):
             intents.add("memory")
     if any(str(k).lower() in text for k in keywords.get("rag") or ()):
         intents.add("rag")
@@ -54,6 +66,24 @@ def memory_query(query: str) -> str:
             continue
         terms.append(clean)
     return " OR ".join(terms[:8])
+
+
+def memory_capture(query: str) -> str | None:
+    """Extract content from an explicit storage request, never a recall question."""
+    if len(query) > 4000:
+        return None
+    match = _CAPTURE_REQUEST.match(query)
+    if match is None:
+        return None
+    body = match.group("body").strip()
+    # Imperatives often name the destination before a colon; the durable fact
+    # follows it ("store this in long-term memory: my favourite …").
+    if ":" in body and "://" not in body:
+        before, after = body.split(":", 1)
+        if after.strip() and len(before) <= 120:
+            body = after.strip()
+    body = _CAPTURE_FILLER.sub("", body).strip(" \t\r\n:,-")
+    return body if len(body) >= 3 else None
 
 
 def query_collection(query: str) -> str | None:
@@ -88,7 +118,8 @@ def _rag_excerpt(result: dict, remaining: int) -> str:
 
 
 async def _record_call(runtime: Any, rs: Any, name: str, args: dict,
-                       result: Any, emit: Any, emit_cost: Any) -> None:
+                       result: Any, emit: Any, emit_cost: Any,
+                       *, capture: bool = False) -> None:
     from runtime.dispatch_guards import _traj_entry
 
     preview_cap = int((runtime.config.get("web") or {}).get("tool_preview_chars", 8000))
@@ -98,7 +129,8 @@ async def _record_call(runtime: Any, rs: Any, name: str, args: dict,
         "result_preview": (result.to_model_message()[:preview_cap]
                            if result.status == "ok" else None),
         "latency_ms": result.latency_ms, "tokens": result.tokens_used,
-        "private": result.private, "recall_prefetch": True,
+        "private": result.private, "recall_prefetch": not capture,
+        "capture_prefetch": capture,
     })
     rs.trajectory.append(_traj_entry(name, args, result))
     rs.tools_used.append(name)
@@ -114,18 +146,42 @@ async def _record_call(runtime: Any, rs: Any, name: str, args: dict,
                         rs.budget.cost_usd - before)
 
 
+def _insert_notice(rs: Any, content: str) -> int:
+    """Insert run-scoped evidence immediately before the current user turn."""
+    msg_idx = [i for i, message in enumerate(rs.messages)
+               if message.get("role") == "user"][-1]
+    rs.messages.insert(msg_idx, {"role": "system", "content": content})
+    return msg_idx
+
+
 async def prefetch_recall(runtime: Any, rs: Any, ctx: Any, *, query: str,
                           collection: str | None, depth: int,
                           disabled_tools: set[str] | None,
                           emit: Any, emit_cost: Any) -> None:
-    """Prefetch allowed local evidence and insert it before the user turn."""
+    """Capture explicit facts and prefetch allowed local evidence."""
     cfg = ((ctx.config.get("tool_selection") or {}).get("recall") or {})
     if depth != 0 or not cfg.get("enabled", True) or not query:
         return
-    intents = recall_intents(query, ctx.config)
     disabled = disabled_tools or set()
+    content = memory_capture(query) if cfg.get("capture_explicit", False) else None
+    if content and "memory.append" not in disabled \
+            and (rs.allowed is None or "memory.append" in rs.allowed):
+        args: dict[str, Any] = {
+            "content": content, "kind": "fact",
+            "tags": "auto-capture", "source": "explicit-user-request"}
+        result = await runtime._execute_tool("memory.append", args, ctx)
+        await _record_call(runtime, rs, "memory.append", args, result,
+                           emit, emit_cost, capture=True)
+        if result.status == "ok" and isinstance(result.result, dict):
+            entry_id = result.result.get("id")
+            _insert_notice(rs, (
+                f"The user's explicit storage request was already completed with "
+                f"memory.append (entry {entry_id}). Confirm it briefly and do NOT "
+                "append the same fact again."))
+            return
+    intents = recall_intents(query, ctx.config)
     max_chars = max(200, int(cfg.get("max_chars", 1600)))
-    calls = []
+    calls: list[tuple[str, dict[str, Any]]] = []
     if "memory" in intents:
         args = {"query": memory_query(query), "limit": 3}
         if args["query"]:
@@ -159,9 +215,7 @@ async def prefetch_recall(runtime: Any, rs: Any, ctx: Any, *, query: str,
     content = header + "\n".join(excerpts)
     if len(content) > max_chars:
         content = content[:max_chars - 1].rstrip() + "…"
-    msg_idx = [i for i, message in enumerate(rs.messages)
-               if message.get("role") == "user"][-1]
-    rs.messages.insert(msg_idx, {"role": "system", "content": content})
+    msg_idx = _insert_notice(rs, content)
     if private:
         rs.private_taint.add(msg_idx)
         ctx.private_taint = True

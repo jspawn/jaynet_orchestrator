@@ -35,6 +35,13 @@ def test_parse_valid_case():
     assert c.id == "demo" and c.name == "Test case"
     assert c.driver == "scripted" and c.turns == ["hello"]
     assert c.expect["must_use_tools"] == ["fs.read"]
+    assert c.isolate_turns is False
+
+
+def test_parse_isolated_turns_roundtrip():
+    c = parse_case("demo", _VALID + "isolate_turns: true\n", "builtin")
+    assert c.isolate_turns is True
+    assert c.to_dict()["isolate_turns"] is True
 
 
 @pytest.mark.parametrize("raw,needle", [
@@ -936,6 +943,24 @@ def test_run_case_adaptive_driver(tmp_path, monkeypatch):
     hist = rt.calls[1][1]["history"]
     assert hist[0] == {"role": "user", "content": "hi"}
     assert row["passed"] in (True, 1)
+    store.close()
+
+
+def test_run_case_isolated_turns_keep_stores_but_not_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["stored", "25 mm Plössl"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(turns=["remember this", "what did I store?"],
+                 isolate_turns=True)
+    run(eval_runner.run_case(rt, case, store))
+
+    assert [call[1]["history"] for call in rt.calls] == [None, None]
+    memory_paths = [call[1]["run_overrides"]["tools_patch"]["memory"]["db_path"]
+                    for call in rt.calls]
+    rag_paths = [call[1]["run_overrides"]["tools_patch"]["rag"]["db_path"]
+                 for call in rt.calls]
+    assert len(set(memory_paths)) == 1
+    assert len(set(rag_paths)) == 1
     store.close()
 
 

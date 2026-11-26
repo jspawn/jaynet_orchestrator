@@ -2305,7 +2305,9 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     disabled_tools=ctx.disabled_tools,
                     confirm_provider=_EvalConfirm(),
                     ask_provider=ask_provider,
-                    history=history or None,
+                    # Isolated turns model separate conversations while the
+                    # per-case sandbox (memory/RAG/project stores) persists.
+                    history=None if case.isolate_turns else (history or None),
                     owner=_EVAL_OWNER,
                     # Evals run as the operator: the full toolset, including
                     # admin-only tools (explicit since is_admin fails closed).

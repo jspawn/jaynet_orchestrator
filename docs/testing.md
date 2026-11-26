@@ -60,6 +60,7 @@ Fixtures (`tests/conftest.py`):
 | `test_plan_gate.py` | deterministic auto/plan/direct routing, risky-work override, harness-side architect completion/failure, no parent-model fallback |
 | `test_procedure_selector.py` | shape-procedure checkpoints plus attachment, document-size and repeated-failure skill gates, policy exclusions and resource paths |
 | `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `specialist.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
+| `test_recall.py` | explicit memory capture without duplicate writes, automatic substantive-query recall, privacy/allowlist caps and a real memory round-trip across isolated runs |
 
 ### Web, API & chats
 
@@ -130,7 +131,7 @@ Fixtures (`tests/conftest.py`):
 
 | File | What it pins |
 |---|---|
-| `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback; the deterministic grading keys (`answer_exact_any` GAIA normalization, `checker` scripts) and the container-case lifecycle (preflight skip, start/exec/stop, tools_patch routing) |
+| `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, isolated turns with persistent stores, $-only budgets, judge state block + JSON-retry, judge fallback; the deterministic grading keys (`answer_exact_any` GAIA normalization, `checker` scripts) and the container-case lifecycle (preflight skip, start/exec/stop, tools_patch routing) |
 | `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject, brain-overlay accept/retry/history/rollback, harness-experiment routes |
 | `test_harness_experiments.py` | Propose–Probe–Compose sequencing, two-cycle overlay carry-over, repetition/cancellation, singular/canonical overlay validation and isolation, evidence-classified lesson retrieval, regression rejection, editor retry with cumulative usage, unprobed-target refusal, atomic brain-overlay proposals |
 | `test_eval_stats.py` | eval.db statistics — KPIs, per-case flakiness, A/B period compare |

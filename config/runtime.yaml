@@ -830,7 +830,9 @@ tool_selection:
   # the tool schema and busts the prompt-cache prefix once, so keep it small.
   max_expansions: 2
   recall:
-    enabled: true             # depth-0 memory recall on explicit recall intent
+    enabled: true             # depth-0 local capture + recall before the first model turn
+    auto_memory: true         # substantive requests search owner-scoped memory (max 3 hits)
+    capture_explicit: true    # "remember/store …" persists once; model only confirms
     max_chars: 1600           # total injected evidence, including labels
     collection: null          # automatic RAG is off until a collection is named
     min_score: 0.5            # cosine floor; calibrate for the active embedder

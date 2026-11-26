@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from runtime.recall import memory_query, prefetch_recall, recall_intents
+from runtime.recall import memory_capture, memory_query, prefetch_recall, recall_intents
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -180,3 +180,89 @@ async def test_prefetch_respects_depth_allowlist_disabled_and_cap():
     await _run(runtime, rs, query, config=_config(max_chars=200))
     assert len(rs.messages[1]["content"]) == 200
     assert rs.messages[1]["content"].endswith("…")
+
+
+def test_explicit_capture_extraction():
+    assert memory_capture(
+        "Please remember for good: my coffee order is a flat white") == \
+        "my coffee order is a flat white"
+    assert memory_capture(
+        "Store this in your long-term memory: my telescope is a Dobsonian") == \
+        "my telescope is a Dobsonian"
+    assert memory_capture("Remember that I picked the 25 mm eyepiece") == \
+        "I picked the 25 mm eyepiece"
+    assert memory_capture("What do you remember about my telescope?") is None
+    assert memory_capture("Forget my old coffee order") is None
+
+
+@pytest.mark.asyncio
+async def test_explicit_capture_persists_once_and_tells_model_not_to_duplicate():
+    tool = _RecallTool("memory.append", {"id": 7, "ts": "now"})
+    runtime = _Runtime(tool)
+    cfg = _config()
+    cfg["tool_selection"]["recall"]["capture_explicit"] = True
+    rs = _state("Please remember for good: my coffee order is a flat white")
+    ctx, events = await _run(runtime, rs, rs.messages[-1]["content"], config=cfg)
+
+    assert tool.calls[0][0] == {
+        "content": "my coffee order is a flat white", "kind": "fact",
+        "tags": "auto-capture", "source": "explicit-user-request"}
+    assert rs.tools_used == ["memory.append"]
+    assert "entry 7" in rs.messages[1]["content"]
+    assert "do NOT append" in rs.messages[1]["content"]
+    assert events[0][2]["capture_prefetch"] is True
+    assert events[0][2]["recall_prefetch"] is False
+    assert not rs.private_taint
+
+
+@pytest.mark.asyncio
+async def test_auto_memory_recalls_substantive_questions_but_not_small_talk():
+    tool = _RecallTool("memory.search", {"matches": [{
+        "kind": "fact", "content": "Lunar eyepiece: 25 mm Plössl",
+    }]})
+    runtime = _Runtime(tool)
+    cfg = _config()
+    cfg["tool_selection"]["recall"]["auto_memory"] = True
+    query = "Which eyepiece did I pick for lunar viewing?"
+    rs = _state(query)
+    await _run(runtime, rs, query, config=cfg)
+
+    assert tool.calls[0][0]["limit"] == 3
+    assert "eyepiece" in tool.calls[0][0]["query"]
+    assert "25 mm" in rs.messages[1]["content"]
+
+    await _run(runtime, _state("Hi"), "Hi", config=cfg)
+    assert len(tool.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_capture_respects_allowlist_and_disabled_tools():
+    tool = _RecallTool("memory.append", {"id": 7})
+    runtime = _Runtime(tool)
+    cfg = _config()
+    cfg["tool_selection"]["recall"]["capture_explicit"] = True
+    query = "Remember that my telescope is a Dobsonian"
+    await _run(runtime, _state(query, allowed=[]), query, config=cfg)
+    await _run(runtime, _state(query), query, config=cfg,
+               disabled={"memory.append"})
+    assert tool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_real_memory_roundtrip_across_isolated_runs(tmp_path):
+    from tools.memory.store import MemoryAppend, MemorySearch
+
+    runtime = _Runtime(MemoryAppend(), MemorySearch())
+    cfg = _config()
+    cfg["tool_selection"]["recall"].update({
+        "auto_memory": True, "capture_explicit": True})
+    cfg["tools"] = {"memory": {"db_path": str(tmp_path / "memory.db")}}
+
+    first = "Please remember for good: I picked the 25 mm Plössl eyepiece"
+    await _run(runtime, _state(first), first, config=cfg)
+    second = "Which eyepiece did I pick?"
+    rs = _state(second)                 # deliberately no first-turn history
+    await _run(runtime, rs, second, config=cfg)
+
+    assert rs.tools_used == ["memory.search"]
+    assert "25 mm Plössl" in rs.messages[1]["content"]
