@@ -283,8 +283,8 @@ class ScheduledRunner:
                 except Exception as exc:
                     print(f"[scheduler] tick failed: {exc}")
 
-        # Hold a reference — asyncio only weak-refs tasks.
-        self.s.prompt_sched_task = asyncio.create_task(loop())
+        # Tracked by the same shutdown path as every other background task.
+        self.s.prompt_sched_task = spawn_background(loop(), name="scheduler-loop")
         print(f"[scheduler] enabled (tick {int(self.config.get('tick_s', 30))}s, "
               f"store {self.schedules.path})")
 

@@ -45,6 +45,7 @@ def ensure_private_store(db_path: str) -> None:
 class ChatStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._store_ready = False
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript("""
@@ -92,8 +93,10 @@ class ChatStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        ensure_private_store(self.db_path)
+        if not self._store_ready:
+            conn.execute("PRAGMA journal_mode=WAL")
+            ensure_private_store(self.db_path)
+            self._store_ready = True
         return conn
 
     def list(self, owner: str | None = None) -> list[dict]:
@@ -308,6 +311,7 @@ class FlagStore:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._store_ready = False
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript("""
@@ -333,8 +337,10 @@ class FlagStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        ensure_private_store(self.db_path)
+        if not self._store_ready:
+            conn.execute("PRAGMA journal_mode=WAL")
+            ensure_private_store(self.db_path)
+            self._store_ready = True
         return conn
 
     @staticmethod
@@ -402,6 +408,7 @@ class ReportStore:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._store_ready = False
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript("""
@@ -421,8 +428,10 @@ class ReportStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        ensure_private_store(self.db_path)
+        if not self._store_ready:
+            conn.execute("PRAGMA journal_mode=WAL")
+            ensure_private_store(self.db_path)
+            self._store_ready = True
         return conn
 
     def create(self, *, run_id: str, owner: str, trigger: str, status: str,
@@ -502,6 +511,7 @@ class ScheduleRunStore:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._store_ready = False
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript("""
@@ -523,8 +533,10 @@ class ScheduleRunStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        ensure_private_store(self.db_path)
+        if not self._store_ready:
+            conn.execute("PRAGMA journal_mode=WAL")
+            ensure_private_store(self.db_path)
+            self._store_ready = True
         return conn
 
     def add(self, schedule_id: str, owner: str | None, run_id: str | None,

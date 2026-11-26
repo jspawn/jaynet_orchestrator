@@ -387,6 +387,7 @@ def register(app, s):
             d.mkdir(parents=True, exist_ok=True)
             (d / "SKILL.md").write_text(req.content, encoding="utf-8")
             skills_cache_clear()
+            runtime.refresh_plugins()
         elif kind == "chain":
             d = paths.CUSTOM_CHAINS_DIR
             d.mkdir(parents=True, exist_ok=True)
@@ -397,9 +398,10 @@ def register(app, s):
             d.mkdir(parents=True, exist_ok=True)
             (d / f"{name}.yaml").write_text(req.content, encoding="utf-8")
         else:
-            d = paths.CUSTOM_TOOLS_DIR
-            d.mkdir(parents=True, exist_ok=True)
-            (d / f"{name}.py").write_text(req.content, encoding="utf-8")
+            existing = _find_custom_tool(name)
+            f = existing or paths.CUSTOM_TOOLS_DIR / f"{name}.py"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(req.content, encoding="utf-8")
         return {"ok": True, "needs_restart": kind in ("connector", "tool")}
 
     # ---- delete (custom layer only, never builtin paths) ----
@@ -417,6 +419,7 @@ def register(app, s):
                 raise HTTPException(status_code=404, detail=f"no skill '{name}'")
             shutil.rmtree(d)
             skills_cache_clear()
+            runtime.refresh_plugins()
         elif kind == "chain":
             f = paths.CUSTOM_CHAINS_DIR / f"{name}.yaml"
             if not f.is_file():
@@ -545,6 +548,7 @@ def register(app, s):
             raise HTTPException(status_code=400, detail=f"invalid pack: {e}")
         if kind == "skill":
             skills_cache_clear()
+            runtime.refresh_plugins()
         out = {"ok": True, "installed": res["installed"], "kind": kind,
                "name": name,
                "needs_restart": kind in ("connector", "tool", "plugin")}

@@ -517,6 +517,11 @@ def _stub_only_toolset(registry, allowed: list[str] | None) -> bool:
     return all(isinstance(by_name.get(n), RecordingStubTool) for n in allowed)
 
 
+async def _revoke_subcall_grant(rs, grant) -> None:
+    if rs.subcall_server is not None:
+        rs.subcall_server.revoke_grant(grant)
+
+
 def _flush_deferred_messages(rs) -> None:
     """Append dispatch-gate notes after the current turn's tool messages."""
     if rs.deferred_messages:
@@ -1284,6 +1289,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     await rs.subcall_server.start()
                 return rs.subcall_server.mint_grant()
             ctx.subcall_grant = _subcall_grant
+
+        ctx.subcall_revoke = lambda grant: _revoke_subcall_grant(rs, grant)
 
         # tools.load seam: mid-run toolset expansion. The frozen set is the
         # cache-stability default; this is the bounded escape hatch for when

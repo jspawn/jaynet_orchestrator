@@ -14,7 +14,8 @@ async def test_voice_default_keeps_voice_persona(web_app, web_client, record_run
         assert r.status_code == 200
     assert seen["think"] is False
     assert seen["extra_system"] == vcfg.get("persona")
-    assert seen["budget_overrides"] == (vcfg.get("budget") or None)
+    assert seen["budget_overrides"] == vcfg.get("budget")
+    assert await seen["confirm_provider"].confirm("r", "code.run", {}) is False
     assert seen["model"] == vcfg.get("model")
 
 
@@ -28,7 +29,11 @@ async def test_chat_mode_drops_voice_shaping(web_app, web_client, record_run):
         assert r.json()["conversation_id"]
     assert seen["think"] is True
     assert seen["extra_system"] is None
-    assert seen["budget_overrides"] is None
+    global_budget = app.state.runtime.config.get("budgets") or {}
+    assert seen["budget_overrides"] == {
+        k: global_budget[k] for k in
+        ("max_iterations", "max_wall_clock_s", "max_cost_usd", "max_total_tokens")
+        if global_budget.get(k) is not None}
     assert seen["model"] is None
 
 

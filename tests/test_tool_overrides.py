@@ -46,6 +46,24 @@ def test_roundtrip_and_apply(ovfile):
     tool_overrides.apply(reg)                 # idempotent
 
 
+def test_load_ignores_null_descriptions(ovfile):
+    ovfile.parent.mkdir(parents=True)
+    ovfile.write_text("fs.read: null\nweb.search: useful wording\n")
+    assert tool_overrides.load() == {"web.search": "useful wording"}
+
+
+def test_concurrent_saves_use_unique_atomic_temp_files(ovfile):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(
+            lambda i: tool_overrides.save({f"tool.{i}": f"description {i}"}),
+            range(12)))
+    loaded = tool_overrides.load()
+    # Last complete writer wins; every result must be one intact payload.
+    assert loaded in [{f"tool.{i}": f"description {i}"} for i in range(12)]
+    assert not list(ovfile.parent.glob("*.tmp"))
+
+
 def test_apply_stashes_pristine_and_restore_brings_it_back(ovfile):
     reg = _Registry([_Tool("fs.read")])
     tool_overrides.save({"fs.read": "better wording"})

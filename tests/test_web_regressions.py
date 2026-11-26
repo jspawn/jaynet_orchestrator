@@ -884,6 +884,16 @@ async def test_upload_shtml_is_attachment_not_same_origin_html(web_app, web_clie
         assert "attachment" in r.headers["content-disposition"]
 
 
+@pytest.mark.asyncio
+async def test_admin_trailing_slash_requires_admin(web_app, web_client):
+    app = web_app()
+    app.state.users.create("bob", "bobpass123", is_admin=False)
+    async with web_client(app, username="bob", password="bobpass123") as c:
+        r = await c.get("/admin/", follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers["location"] == "/"
+
+
 # ==============================================================================
 # Pre-public audit fixes: M2 (2FA throttle), M3 (body caps), L6 (logout
 # revocation), L7 (dummy hash), L9 (shared min password length), I3 (PBKDF2

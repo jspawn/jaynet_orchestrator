@@ -56,6 +56,31 @@ def test_collect_and_report(tmp_path):
     assert "0%" in line
 
 
+def test_collect_supports_uri_special_characters_in_path(tmp_path):
+    path = tmp_path / "trace?#.db"
+    _make_db(path)
+    tools, runs = collect(str(path))
+    assert tools["fs.read"]["calls"] == 2
+    assert len(runs) == 3
+
+
+def test_collect_closes_connection_on_query_error(monkeypatch):
+    class _Conn:
+        closed = False
+
+        def execute(self, *args):
+            raise RuntimeError("bad query")
+
+        def close(self):
+            self.closed = True
+
+    con = _Conn()
+    monkeypatch.setattr("runtime.tool_value.sqlite3.connect", lambda *a, **k: con)
+    with pytest.raises(RuntimeError, match="bad query"):
+        collect("irrelevant")
+    assert con.closed is True
+
+
 def test_tail_section(tmp_path):
     tools, runs = collect(_db(tmp_path))
     out = report(tools, runs, min_calls=5, by_errors=False)

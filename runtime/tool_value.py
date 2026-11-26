@@ -16,25 +16,26 @@ CLI: scripts/tool_value.py. Admin UI: Eval → Tool telemetry.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 
 def collect(db_path: str) -> tuple[dict[str, dict], dict[str, str]]:
     """Per-tool {calls, errors, runs:set} + {run_id: status}. Read-only."""
-    uri = f"file:{db_path}?mode=ro"
-    con = sqlite3.connect(uri, uri=True)
-    tools: dict[str, dict] = {}
-    for name, status, run_id in con.execute(
-            "SELECT json_extract(payload_json,'$.tool'),"
-            "       json_extract(payload_json,'$.status'), run_id"
-            "  FROM events WHERE kind='tool_result'"):
-        if not name:
-            continue
-        t = tools.setdefault(name, {"calls": 0, "errors": 0, "runs": set()})
-        t["calls"] += 1
-        t["errors"] += 1 if status == "error" else 0
-        t["runs"].add(run_id)
-    runs = dict(con.execute("SELECT id, status FROM runs"))
-    con.close()
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as con:
+        tools: dict[str, dict] = {}
+        for name, status, run_id in con.execute(
+                "SELECT json_extract(payload_json,'$.tool'),"
+                "       json_extract(payload_json,'$.status'), run_id"
+                "  FROM events WHERE kind='tool_result'"):
+            if not name:
+                continue
+            t = tools.setdefault(name, {"calls": 0, "errors": 0, "runs": set()})
+            t["calls"] += 1
+            t["errors"] += 1 if status == "error" else 0
+            t["runs"].add(run_id)
+        runs = dict(con.execute("SELECT id, status FROM runs"))
     return tools, runs
 
 
@@ -42,17 +43,18 @@ def report(tools: dict[str, dict], runs: dict[str, str],
            min_calls: int, by_errors: bool) -> str:
     n_runs = len(runs)
     ok_by_run = {r: (s == "ok") for r, s in runs.items()}
+    total_ok = sum(ok_by_run.values())
     rows = []
     for name, t in tools.items():
         used_ok = [ok_by_run[r] for r in t["runs"] if r in ok_by_run]
-        not_ok = [v for r, v in ok_by_run.items() if r not in t["runs"]]
+        unused_count = n_runs - len(used_ok)
         rows.append({
             "tool": name, "calls": t["calls"],
             "err_pct": round(100 * t["errors"] / t["calls"], 1),
             "run_share": round(100 * len(t["runs"]) / n_runs, 1) if n_runs else 0,
             "ok_with": round(100 * sum(used_ok) / len(used_ok)) if used_ok else None,
-            "ok_without": (round(100 * sum(not_ok) / len(not_ok))
-                           if not_ok else None),
+            "ok_without": (round(100 * (total_ok - sum(used_ok)) / unused_count)
+                           if unused_count else None),
         })
     rows.sort(key=lambda r: -(r["err_pct"] if by_errors else r["calls"]))
     shown = [r for r in rows if r["calls"] >= min_calls]

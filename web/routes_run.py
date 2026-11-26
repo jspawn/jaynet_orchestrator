@@ -128,6 +128,13 @@ def _schedule_tool_gate(users, username: str, is_admin: bool) -> set[str]:
     return {"schedule.add", "schedule.remove"}
 
 
+class _DenyVoiceConfirm:
+    """Voice turns have no confirmation UI; fail gated calls immediately."""
+
+    async def confirm(self, run_id, name, args, emit=None, reason=None):
+        return False
+
+
 def register(app, s):
     runtime = s.runtime
     bus = s.bus
@@ -521,6 +528,23 @@ def register(app, s):
             spawn_background(forget_later(), name=f"bus-forget-{run_id[:8]}")
         return _cleanup
 
+    def _tighter(k: str, cur: float, new: float) -> float:
+        return new if not cur else (cur if not new else min(cur, new))
+
+    def _run_budget(username: str, req_budget: dict | None) -> dict:
+        # Admin global < per-user < request; each layer may only tighten.
+        global_budget = runtime.config.get("budgets") or {}
+        run_budget = {k: global_budget[k] for k in _BUDGET_KEYS
+                      if global_budget.get(k) is not None}
+        if username != "_token":
+            for k, v in users.get_budget_defaults(username).items():
+                run_budget[k] = (_tighter(k, run_budget[k], v)
+                                 if k in run_budget else v)
+        for k, v in _coerce_budget(req_budget or {}).items():
+            run_budget[k] = (_tighter(k, run_budget[k], v)
+                             if k in run_budget else v)
+        return run_budget
+
     async def _launch_agent_run(*, username: str, message: str,
                                 history: list | None = None,
                                 conversation_id: str | None = None,
@@ -610,31 +634,7 @@ def register(app, s):
                                           _meta, _wr):
                     if isinstance(_extra, (list, tuple)):
                         _force_tools.extend(str(n) for n in _extra)
-        # ---- budget governance ---------------------------------------------
-        # Ceilings for this run layer as: admin-set global defaults (runtime.yaml
-        # + persisted budget-defaults.json) < per-user account defaults (the
-        # /account page) < this request's overrides. Each layer may only TIGHTEN
-        # the one below (per-key min) — a user can tighten their own runs but no
-        # layer can raise a ceiling past what the admin granted. Special case:
-        # 0 = "no ceiling / no opinion" for every key: a positive value
-        # tightens an unlimited (0) layer, a 0 never overrides a real ceiling.
-        def _tighter(k: str, cur: float, new: float) -> float:
-            return new if not cur else (cur if not new else min(cur, new))
-
-        global_budget = runtime.config.get("budgets") or {}
-        run_budget = {k: global_budget[k] for k in _BUDGET_KEYS
-                      if global_budget.get(k) is not None}
-        if username != "_token":      # token sessions have no account page
-            for k, v in users.get_budget_defaults(username).items():
-                if k in run_budget:
-                    run_budget[k] = _tighter(k, run_budget[k], v)
-                else:
-                    run_budget[k] = v
-        for k, v in _coerce_budget(req_budget or {}).items():
-            if k not in run_budget:
-                run_budget[k] = v
-            else:
-                run_budget[k] = _tighter(k, run_budget[k], v)
+        run_budget = _run_budget(username, req_budget)
         # ---- model impersonator (/imp): the user-bound brain override --------
         imp = {} if username == "_token" else users.get_brain_override(username)
         imp_model = None
@@ -1152,7 +1152,8 @@ def register(app, s):
         # voice:false = chat client on the same server-managed conversation:
         # full markdown persona (no overlay), thinking on, normal budgets/model.
         run_id = uuid.uuid4().hex
-        vbudget = (vcfg.get("budget") or None) if req.voice else None
+        vbudget = _run_budget(
+            owner or "_token", (vcfg.get("budget") or None) if req.voice else None)
 
         async def on_event(event: dict) -> None:
             await bus.publish(run_id, event)
@@ -1169,7 +1170,7 @@ def register(app, s):
                 budget_overrides=vbudget,
                 model=vcfg.get("model") if req.voice else None,
                 tools=allow, run_id=run_id, on_event=on_event,
-                confirm_provider=provider, ask_provider=qprovider,
+                confirm_provider=_DenyVoiceConfirm(), ask_provider=qprovider,
                 history=_history_from_turns(turns),
                 owner=owner, is_admin=bool(_user(request).get("is_admin")),
                 work_root=(str(_wr) if _wr else None),

@@ -37,7 +37,7 @@ _SECRET_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD",
 def scrub_env(env: dict) -> dict:
     """Return a copy of `env` with secrets stripped (rule above)."""
     return {k: v for k, v in env.items()
-            if k not in _SECRET_ENV_NAMES
+            if k.upper() not in _SECRET_ENV_NAMES
             and not k.upper().endswith(_SECRET_ENV_SUFFIXES)}
 
 
@@ -342,6 +342,7 @@ class ToolContext:
     # billed, taint-gated, trace-logged — see runtime/subcall.py). None = the
     # snippet runs without llm_query helpers.
     subcall_grant: Any = None              # async callable(limits: dict) -> dict
+    subcall_revoke: Any = None             # async callable(grant: dict) -> None
 
 
 # ----------------------------------------------------------------------------
@@ -440,7 +441,8 @@ def _not_found_hint(p: Path) -> str:
         parent = missing.parent
         if not (parent.exists() and parent.is_dir()):
             return ""
-        names = [e.name for e in parent.iterdir()]
+        from itertools import islice
+        names = [e.name for e in islice(parent.iterdir(), 500)]
         match = _closest_name(missing.name, names)
         if match and match != missing.name:
             return (f" — no '{missing.name}' in '{parent}', but a similar name "

@@ -178,6 +178,31 @@ async def test_promote_chat_cannot_steal_other_users_files(tmp_path, web_app, we
 
 
 @pytest.mark.asyncio
+async def test_promote_chat_skips_direct_and_nested_output_symlinks(tmp_path, web_app, web_client):
+    app = web_app()
+    outputs = tmp_path / "outputs"
+    secret = tmp_path / "secret.txt"
+    secret.write_text("outside-secret")
+    src = tmp_path / "safe.txt"
+    src.write_text("safe")
+    rid = uuid.uuid4().hex
+    stage_and_bundle(outputs, rid, "admin", [str(src)], None, 1 << 20)
+    files = outputs / rid / "files"
+    (files / "direct-link").symlink_to(secret)
+    (files / "nested").mkdir()
+    (files / "nested" / "link").symlink_to(secret)
+    app.state.chats.upsert("links", "t", [
+        {"user_message": "u", "answer": "a", "run_id": rid}], owner="admin")
+    async with web_client(app) as c:
+        r = await c.post("/api/chats/links/promote", json={"name": "P"})
+    assert r.status_code == 200
+    root = PJ.files_root(tmp_path / "projects", "admin", r.json()["project"]["id"])
+    assert not (root / "direct-link").exists()
+    assert not (root / "nested" / "link").exists()
+    assert (root / "safe.txt").read_text() == "safe"
+
+
+@pytest.mark.asyncio
 async def test_save_chat_cannot_pin_other_users_output(tmp_path, web_app, web_client):
     """A forged run_id in saved turns must not flip saved:true on an output
     owned by someone else."""

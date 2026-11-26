@@ -263,6 +263,7 @@ class LoginThrottle:
 class UserStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._store_ready = False
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript("""
@@ -323,8 +324,10 @@ class UserStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        ensure_private_store(self.db_path)
+        if not self._store_ready:
+            conn.execute("PRAGMA journal_mode=WAL")
+            ensure_private_store(self.db_path)
+            self._store_ready = True
         return conn
 
     def _seed_admin(self) -> None:
@@ -382,7 +385,8 @@ class UserStore:
         if not u:
             return None
         return {"username": u["username"], "is_admin": bool(u["is_admin"]),
-                "created_at": u["created_at"], "twofa": bool(u["totp_secret"])}
+                "created_at": u["created_at"], "twofa": bool(u["totp_secret"]),
+                "session_epoch": int(u["session_epoch"])}
 
     def list(self) -> list[dict]:
         with self._conn() as conn:

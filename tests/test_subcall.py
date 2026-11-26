@@ -140,6 +140,60 @@ def test_exhausted_budget_refuses(monkeypatch, tmp_path):
     assert grant["used"] == 0
 
 
+def test_non_string_model_is_clean_validation_error(monkeypatch, tmp_path):
+    rt = _FakeRuntime()
+    s, _ = _server(monkeypatch, tmp_path, rt=rt)
+    grant = s.mint_grant()
+    r = _serve(s, grant, model=123)
+    assert r["status"] == "error" and "must be a string" in r["error"]
+    assert rt.calls == []
+
+
+def test_max_tokens_has_positive_floor(monkeypatch, tmp_path):
+    rt = _FakeRuntime()
+    s, _ = _server(monkeypatch, tmp_path, rt=rt)
+    for value in (0, -1):
+        grant = s.mint_grant()
+        assert _serve(s, grant, max_tokens=value)["status"] == "ok"
+        assert rt.calls[-1]["sampling"]["max_tokens"] == 1
+
+
+def test_socket_permissions_and_writer_close(monkeypatch, tmp_path):
+    import stat
+
+    s, _ = _server(monkeypatch, tmp_path)
+
+    class _Reader:
+        async def readline(self):
+            return b'{"token":"unknown"}\n'
+
+    class _Writer:
+        closed = False
+        waited = False
+
+        def write(self, data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            self.waited = True
+
+    async def main():
+        await s.start()
+        assert stat.S_IMODE(Path(s.sock_path).stat().st_mode) == 0o600
+        writer = _Writer()
+        await s._handle(_Reader(), writer)
+        assert writer.closed and writer.waited
+        await s.close()
+
+    asyncio.run(main())
+
+
 # --------------------------------------------------------- code.run seam ---
 
 def test_build_cmd_whitelists_subcall_socket(monkeypatch, tmp_path):
@@ -186,6 +240,11 @@ def test_end_to_end_snippet_llm_query(monkeypatch, tmp_path):
             config={"tools": {"code": {"workdir": str(tmp_path / "work"),
                                        "python": sys.executable}}})
         ctx.subcall_grant = grant_fn
+
+        async def revoke_fn(grant):
+            server.revoke_grant(grant)
+
+        ctx.subcall_revoke = revoke_fn
         try:
             return await CodeRun().execute({"command": (
                 "answers = llm_query_batched(['slice A', 'slice B'], workers=2)\n"
@@ -202,6 +261,7 @@ def test_end_to_end_snippet_llm_query(monkeypatch, tmp_path):
     assert r.result["subcalls"] == {"used": 3, "max": 64}
     assert len(rt.calls) == 3
     assert events.count("subcall") == 3
+    assert not server._grants                      # execution token was revoked
     # socket file cleaned up on close
     assert not list(tmp_path.glob("subcall-*.sock"))
 

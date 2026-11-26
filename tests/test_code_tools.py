@@ -149,7 +149,8 @@ def test_scrub_env_rule():
            "LITELLM_MASTER_KEY": "x", "TAVILY_API_KEY": "y", "SOME_TOKEN": "z",
            "DB_PASSWORD": "w", "APP_SECRET": "v",
            "SSH_PASSPHRASE": "p", "GITHUB_PAT": "q", "PG_DSN": "r",
-           "DATABASE_URL": "postgres://u:p@h/db"}
+           "DATABASE_URL": "postgres://u:p@h/db",
+           "database_url": "postgres://u:p@h/db", "redis_url": "redis://u:p@h"}
     assert scrub_env(env) == {"PATH": "/bin", "HOME": "/h", "LANG": "C",
                               "EDITOR": "vim"}
 

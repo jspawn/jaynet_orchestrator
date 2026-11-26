@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.52.3 — 2026-11-27
+
+- **Runtime and process reliability:** correct transcript ordering, parallel
+  cancellation, process-group cleanup, oversized log handling, shell-free managed
+  launches, bounded log tails, and cancellation-resistant shutdown. Budget,
+  spawn-config, privacy, and HTTP lifecycle fixes are included.
+- **Launch and subcall hardening:** local vLLM model directories, normalized GPU
+  lists, strict subcall validation, mode-0600 sockets, closed writers, and
+  per-execution grant revocation.
+- **Studio and web:** live skill refreshes, in-place nested tool edits, unified
+  voice budgets and fail-fast confirmations, tracked scheduler shutdown, and
+  safer output promotion without symlink following.
+- **Persistence:** atomic concurrent override saves, URI-safe SQLite reads,
+  one-time store setup, single-query session validation, and smaller upload,
+  telemetry, and directory-scan overhead.
+- **Verification:** 2,954 tests pass, plus all release gates.
+
 ## 1.52.2 — 2026-11-26
 
 - **Loop correctness:** fix interactive confirmation and admin `force_tools`

@@ -107,6 +107,22 @@ def test_hf_repo_id_accepted_without_file():
         build_argv("vllm", {"MODEL_PATH": "/no/such/file.gguf"}, **_kwargs())
 
 
+def test_vllm_accepts_local_model_directory(tmp_path):
+    model = tmp_path / "Qwen3-32B"
+    model.mkdir()
+    (model / "config.json").write_text("{}")
+    argv, _, _ = build_argv("vllm", {"MODEL_PATH": str(model)}, **_kwargs())
+    assert argv[2] == str(model)
+
+
+def test_gpu_cards_are_stripped_before_device_env_render(tmp_path):
+    model = tmp_path / "m.gguf"
+    model.write_text("x")
+    _, env, _ = build_argv("vllm", {"MODEL_PATH": str(model)},
+                           **_kwargs(gpu="0, 1"))
+    assert env["HIP_VISIBLE_DEVICES"] == "0,1"
+
+
 def test_cpu_refused_and_backend_validated(tmp_path):
     model = tmp_path / "m.gguf"
     model.write_text("x")

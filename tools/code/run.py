@@ -768,6 +768,13 @@ class CodeRun(Tool):
                 result["sandbox_warning"] = sandbox_note
             return ToolResult(status="ok", result=result)
         finally:
+            if subcall:
+                try:
+                    revoke = getattr(ctx, "subcall_revoke", None)
+                    if revoke is not None:
+                        await revoke(subcall)
+                except Exception:
+                    _log.warning("subcall grant revocation failed", exc_info=True)
             shutil.rmtree(workdir, ignore_errors=True)
 
     def _build_python_cmd(self, script: str, sandbox: str | None, workdir: Path,

@@ -307,6 +307,21 @@ def _warn_if_fallback_data_dir():
             "JAYNET_DATA to point at the real data directory.", DATA)
 
 
+def _ignore_output_symlinks(directory, names):
+    return [name for name in names if (Path(directory) / name).is_symlink()]
+
+
+def _copy_output_entry(item: Path, dest: Path) -> bool:
+    """Copy one output without following direct or nested symlinks."""
+    if item.is_symlink():
+        return False
+    if item.is_dir():
+        shutil.copytree(item, dest, ignore=_ignore_output_symlinks)
+    else:
+        shutil.copy2(item, dest)
+    return True
+
+
 def create_app(config_path: str | None = None) -> FastAPI:
     from runtime.paths import CHATS_DB, CONFIG
     _warn_if_fallback_data_dir()
@@ -637,11 +652,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                         i += 1
                     dest = root / f"{stem}-{i}{ext}"
                 try:
-                    if item.is_dir():
-                        shutil.copytree(item, dest)
-                    else:
-                        shutil.copy2(item, dest)
-                    moved += 1
+                    moved += _copy_output_entry(item, dest)
                 except OSError:
                     pass
             mark_saved(outputs_dir, rid, True, owner=owner)
@@ -696,7 +707,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             username, epoch = sess
             u = users.get(username)
             # Reject cookies issued before a "log out everywhere" / password change.
-            if u and users.session_epoch(username) == epoch:
+            if u and u["session_epoch"] == epoch:
                 user = u
         if user is None and request.headers.get("authorization", "").startswith("Bearer "):
             bearer = request.headers["authorization"][7:].strip()
@@ -712,7 +723,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
             return RedirectResponse("/login", status_code=302)
-        if (path == "/admin" or path.startswith("/api/admin")) and not user["is_admin"]:
+        if (path == "/admin" or path.startswith(("/admin/", "/api/admin"))) \
+                and not user["is_admin"]:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "forbidden"}, status_code=403)
             return RedirectResponse("/", status_code=302)

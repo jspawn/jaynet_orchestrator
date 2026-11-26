@@ -135,6 +135,8 @@ async def test_put_get_roundtrip_skill(studio, web_client):
         assert body["origin"] == "custom"
         assert body["description"] == "a test skill"
         assert body["resources"] == []
+        assert "my-skill" in app.state.runtime.skills
+        assert "my-skill" in app.state.runtime.skill_catalog
 
 
 @pytest.mark.asyncio
@@ -169,6 +171,23 @@ async def test_put_get_roundtrip_tool(studio, web_client):
         assert (custom / "tools" / "hello.py").read_text() == TOOL_SRC
         body = (await c.get("/api/admin/studio/tool/hello")).json()
         assert body["content"] == TOOL_SRC and body["path"] == "hello.py"
+
+
+@pytest.mark.asyncio
+async def test_nested_custom_tool_is_updated_in_place(studio, web_client):
+    app, custom, *_ = studio
+    nested = custom / "tools" / "nested"
+    nested.mkdir(parents=True)
+    (nested / "hello.py").write_text(TOOL_SRC)
+    updated = TOOL_SRC + "\n# nested edit\n"
+    async with web_client(app) as c:
+        r = await c.put("/api/admin/studio/tool/hello", json={"content": updated})
+        assert r.status_code == 200, r.text
+        assert (nested / "hello.py").read_text() == updated
+        assert not (custom / "tools" / "hello.py").exists()
+        body = (await c.get("/api/admin/studio/tool/hello")).json()
+        assert body["path"] == "nested/hello.py"
+        assert body["content"] == updated
 
 
 @pytest.mark.asyncio

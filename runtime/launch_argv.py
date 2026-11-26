@@ -374,8 +374,8 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
     model = (conf.get("MODEL_PATH") or "").strip()
     if not model:
         raise ValueError("MODEL_PATH may not be empty")
-    if backend != "saber" and not os.path.isfile(model) and not _REPO_RE.match(model):
-        raise ValueError(f"model not found: {model} (not a file, not an "
+    if backend != "saber" and not os.path.exists(model) and not _REPO_RE.match(model):
+        raise ValueError(f"model not found: {model} (not a filesystem path, not an "
                          "owner/name HF repo id)")
 
     warns: list[str] = []
@@ -386,12 +386,12 @@ def build_argv(backend: str, conf: dict[str, str], *, binary: str,
         if conf.get(key) and not saber_key:
             warns.append(f"{key} dropped: llama-only, no {backend} equivalent")
     extra = shlex.split(conf.get("EXTRA_ARGS") or "")
-    cards = [c for c in gpu.split(",") if c.strip()]
+    cards = [c.strip() for c in gpu.split(",") if c.strip()]
 
     argv = [binary]
     env: dict[str, str] = {}
     if device_env and backend != "saber":
-        env[device_env] = gpu
+        env[device_env] = ",".join(cards)
 
     if backend == "vllm":
         argv += ["serve", model, "--host", host, "--port", str(port),

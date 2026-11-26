@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import time
 
 import pytest
@@ -181,3 +182,72 @@ def test_shutdown_background_ignores_foreign_loop_tasks():
     # cleanup: cancel on the loop that owns the task
     foreign.run_until_complete(P.shutdown_background())
     foreign.close()
+
+
+def test_shutdown_background_logs_cancellation_resistant_task(caplog):
+    async def main():
+        started = asyncio.Event()
+        stop = asyncio.Event()
+
+        async def stubborn():
+            started.set()
+            while not stop.is_set():
+                try:
+                    await asyncio.sleep(0.01)
+                except asyncio.CancelledError:
+                    continue
+
+        task = P.spawn_background(stubborn(), name="stubborn-shutdown")
+        await started.wait()
+        await P.shutdown_background(timeout=0.01)
+        stop.set()
+        await task
+
+    with caplog.at_level(logging.WARNING, logger="runtime.proc"):
+        run(main())
+    assert "stubborn-shutdown" in caplog.text
+
+
+def test_kill_group_skips_sigkill_when_term_exit_is_immediate(monkeypatch):
+    class _Proc:
+        pid = 123
+
+        async def wait(self):
+            return 0
+
+    sent = []
+    monkeypatch.setattr(os, "getpgid", lambda pid: 123)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append(sig))
+    run(P._kill_group(_Proc()))
+    assert sent == [signal.SIGTERM]
+
+
+def test_reap_uses_capped_stream_reader(monkeypatch):
+    class _Stream:
+        def __init__(self):
+            self.chunks = [b"x" * 20000, b""]
+
+        async def read(self, _n):
+            return self.chunks.pop(0)
+
+    class _Proc:
+        def __init__(self):
+            self.stdout = _Stream()
+            self.stderr = None
+
+        async def wait(self):
+            return 0
+
+        async def communicate(self):
+            raise AssertionError("unbounded communicate() must not be used")
+
+    caps = []
+    real_read = P._read_capped
+
+    async def capped(stream, cap):
+        caps.append(cap)
+        return await real_read(stream, cap)
+
+    monkeypatch.setattr(P, "_read_capped", capped)
+    run(P._reap(_Proc(), output_cap=10))
+    assert caps == [10]

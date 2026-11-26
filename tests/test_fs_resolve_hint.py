@@ -21,6 +21,22 @@ def _root():
     return root
 
 
+def test_not_found_hint_caps_directory_scan(monkeypatch):
+    import itertools
+    root = _root()
+    seen = []
+    real_islice = itertools.islice
+
+    def spy(iterable, n):
+        seen.append(n)
+        return real_islice(iterable, n)
+
+    monkeypatch.setattr(itertools, "islice", spy)
+    with pytest.raises(FileNotFoundError):
+        resolve_in_roots([root], "missing-file.md")
+    assert seen == [500]
+
+
 def test_existing_path_resolves():
     root = _root()
     p = resolve_in_roots([root], "3 Custodian activities/FMT_CA_2.md")

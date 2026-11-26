@@ -14,6 +14,8 @@ stale entry; the admin can prune the file by hand).
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from typing import TYPE_CHECKING
 
 import yaml
@@ -40,17 +42,28 @@ def load() -> dict[str, str]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {str(k): str(v) for k, v in raw.items()}
+    return {str(k): str(v) for k, v in raw.items() if v is not None}
 
 
 def save(overrides: dict[str, str]) -> Path:
     p = overrides_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    # tmp + replace (like cloud_store.write_rendered): no truncated live file.
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(yaml.safe_dump(overrides, allow_unicode=True,
-                                  sort_keys=True), encoding="utf-8")
-    tmp.replace(p)
+    # Unique temp + atomic replace: concurrent admin saves cannot clobber a
+    # shared .tmp file; the last complete writer wins.
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                "w", dir=p.parent, prefix=p.name + ".", suffix=".tmp",
+                delete=False, encoding="utf-8") as tmp:
+            tmp_name = tmp.name
+            yaml.safe_dump(overrides, stream=tmp, allow_unicode=True, sort_keys=True)
+        os.replace(tmp_name, p)
+    finally:
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
     return p
 
 

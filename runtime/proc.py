@@ -75,8 +75,11 @@ async def _kill_group(proc: asyncio.subprocess.Process) -> None:
         return
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
-        await asyncio.sleep(_TERM_GRACE_S)
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
+        try:
+            # Do not pay the grace delay when the child exits immediately.
+            await asyncio.wait_for(proc.wait(), timeout=_TERM_GRACE_S)
+        except TimeoutError:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         # Group signal failed — at least take the direct child down.
         try:
@@ -85,13 +88,19 @@ async def _kill_group(proc: asyncio.subprocess.Process) -> None:
             pass
 
 
-async def _reap(proc: asyncio.subprocess.Process) -> None:
-    """Drain the pipes and reap the child after a kill. Without this the
-    dead child stays a zombie, and a grandchild that survived the kill would
-    keep the pipes open — which is exactly the 30s hang this module exists
-    to prevent, so the drain is itself bounded."""
+async def _reap(proc: asyncio.subprocess.Process,
+                output_cap: int = _OUTPUT_CAP) -> None:
+    """Drain with bounded retention and reap the child after a kill."""
+    async def _drain() -> None:
+        async def _err() -> bytes:
+            return (b"" if proc.stderr is None
+                    else await _read_capped(proc.stderr, output_cap))
+        await asyncio.gather(
+            _read_capped(proc.stdout, output_cap), _err())
+        await proc.wait()
+
     try:
-        await asyncio.wait_for(proc.communicate(), timeout=_DRAIN_TIMEOUT_S)
+        await asyncio.wait_for(_drain(), timeout=_DRAIN_TIMEOUT_S)
     except Exception:
         pass
 
@@ -151,11 +160,11 @@ async def run(argv: list[str] | str, *,
         out, err = await asyncio.wait_for(_collect(), timeout)
     except TimeoutError:
         await _kill_group(proc)
-        await _reap(proc)
+        await _reap(proc, output_cap)
         raise
     except asyncio.CancelledError:
         await _kill_group(proc)
-        await _reap(proc)
+        await _reap(proc, output_cap)
         raise
     # Fakes in tests implement the stream seam (stdout/stderr async read +
     # wait) and may omit returncode.
@@ -204,5 +213,11 @@ async def shutdown_background(timeout: float = 5.0) -> None:
         return
     for t in pending:
         t.cancel()
-    await asyncio.wait_for(
-        asyncio.gather(*pending, return_exceptions=True), timeout=timeout)
+    # asyncio.wait (unlike wait_for(gather(...))) returns on timeout even when
+    # a task suppresses cancellation; wait_for would otherwise wait forever
+    # for that same cancellation-resistant task to finish.
+    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if still_pending:
+        _log.warning("background tasks still pending after %.1fs shutdown "
+                     "timeout: %s", timeout,
+                     ", ".join(sorted(t.get_name() for t in still_pending)))

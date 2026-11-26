@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from pathlib import Path
@@ -79,15 +80,15 @@ def llm_query(prompt, model=None, system=None, max_tokens=None, timeout_s=300):
     try:
         s.connect(path)
         s.sendall((_sc_json.dumps(req) + "\\n").encode())
-        buf = b""
-        while not buf.endswith(b"\\n"):
+        chunks = []
+        while not chunks or not chunks[-1].endswith(b"\\n"):
             chunk = s.recv(1 << 16)
             if not chunk:
                 break
-            buf += chunk
+            chunks.append(chunk)
     finally:
         s.close()
-    resp = _sc_json.loads(buf.decode() or "{}")
+    resp = _sc_json.loads(b"".join(chunks).decode() or "{}")
     if resp.get("status") != "ok":
         raise RuntimeError("llm_query: " + str(resp.get("error") or "unknown error"))
     return resp.get("text") or ""
@@ -155,6 +156,8 @@ class SubcallServer:
         self._server = await asyncio.start_unix_server(
             self._accept, path=str(path), limit=_MAX_REQUEST_BYTES)
         self.sock_path = str(path)
+        # Token-bearing socket must not be accessible to other local accounts.
+        os.chmod(path, 0o600)
 
     def mint_grant(self, max_calls: int | None = None) -> dict:
         """One per code.run python call. The returned dict IS the tracked record —
@@ -164,6 +167,10 @@ class SubcallServer:
         self._grants[grant["token"]] = grant
         return grant
 
+    def revoke_grant(self, grant: dict) -> None:
+        """Expire one execution's token as soon as its snippet finishes."""
+        self._grants.pop(str(grant.get("token") or ""), None)
+
     async def close(self) -> None:
         for t in list(self._tasks):
             t.cancel()
@@ -172,6 +179,7 @@ class SubcallServer:
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
+        self._grants.clear()
         if self.sock_path:
             try:
                 Path(self.sock_path).unlink(missing_ok=True)
@@ -214,12 +222,15 @@ class SubcallServer:
             pass
         try:
             writer.close()
-        except OSError:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
             pass
 
     # ---- policy + the call itself ---------------------------------------------
 
     def _resolve_model(self, requested: str | None) -> tuple[str | None, dict | None]:
+        if requested is not None and not isinstance(requested, str):
+            return None, _err("'model' must be a string")
         model = requested or self.default_model
         if model != self.default_model and not is_local_alias(model, self.config):
             return None, _err(
@@ -261,8 +272,9 @@ class SubcallServer:
         if refusal is not None:
             return refusal
         try:
-            max_tokens = min(self._int(req.get("max_tokens"), self.max_output_tokens),
-                             self.max_output_tokens)
+            max_tokens = max(1, min(
+                self._int(req.get("max_tokens"), self.max_output_tokens),
+                self.max_output_tokens))
         except (TypeError, ValueError):
             max_tokens = self.max_output_tokens
         # A run that already hit a ceiling gets refusals, not more spend —

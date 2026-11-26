@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import HTTPException, Request
@@ -33,7 +34,7 @@ def register(app, s):
         stored = f"{uuid.uuid4().hex[:8]}-{safe}"
         d = _owner_dir(request)
         d.mkdir(parents=True, exist_ok=True)
-        (d / stored).write_bytes(raw)
+        await asyncio.to_thread((d / stored).write_bytes, raw)
         return {"id": stored, "name": safe, "kind": _classify(safe), "size": len(raw)}
 
     @app.get("/api/upload/{att_id}")
